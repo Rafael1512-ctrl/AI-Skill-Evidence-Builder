@@ -1,0 +1,847 @@
+// AI Skill Evidence Builder - PostgreSQL schema
+//
+// Conventions
+//  - Models are camelCase in TypeScript, snake_case in the database (@@map / @map).
+//  - Every table has a cuid primary key and created/updated timestamps.
+//  - Money is stored in integer rupiah. Credits are integers. Never floats.
+//  - Balance mutation always happens inside a transaction via the credit ledger.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "nodejs"
+  moduleFormat = "esm"
+}
+
+// Connection URLs are configured in prisma.config.ts (Prisma 7) and passed to the
+// runtime client through the @prisma/adapter-pg driver adapter.
+datasource db {
+  provider = "postgresql"
+}
+
+/* -------------------------------------------------------------------------- */
+/* Enums                                                                       */
+/* -------------------------------------------------------------------------- */
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AuthProvider {
+  PASSWORD
+  GOOGLE
+}
+
+enum CvDocumentKind {
+  ORIGINAL
+  ENHANCED
+}
+
+enum CvAnalysisKind {
+  FREE_AUDIT
+  DEEP_ANALYSIS
+}
+
+enum EnhancementStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum ScreeningJobState {
+  CREATED
+  VALIDATING
+  QUEUED
+  PROCESSING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CandidateState {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RequirementClass {
+  REQUIRED
+  PREFERRED
+  BONUS
+}
+
+enum ScoringCategory {
+  EXPERIENCE
+  TECHNICAL_SKILLS
+  PROJECTS
+  EDUCATION
+  PORTFOLIO
+  OTHER
+}
+
+enum EvidenceStatus {
+  FOUND
+  NOT_FOUND
+  UNCERTAIN
+}
+
+enum VerificationStatus {
+  VERIFIED_EVIDENCE
+  SUPPORTED
+  UNVERIFIED
+  CONFLICTING_INFORMATION
+  NOT_CHECKED
+}
+
+enum EligibilityStatus {
+  HIGH_MATCH
+  CONSIDER
+  LOW_MATCH
+  REQUIREMENT_NOT_MET
+}
+
+enum EvidenceSource {
+  CV
+  GITHUB
+  PORTFOLIO
+  LINKEDIN_SELF_REPORTED
+  USER_INPUT
+  JOB_DESCRIPTION
+}
+
+enum CreditTransactionType {
+  TOP_UP
+  RESERVATION
+  RESERVATION_RELEASE
+  USAGE
+  REFUND
+  ADJUSTMENT
+}
+
+enum ReservationState {
+  ACTIVE
+  SETTLED
+  RELEASED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PAID
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum TestimonialStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReportFormat {
+  PDF
+  CSV
+}
+
+enum IntegrationProvider {
+  GITHUB
+  PORTFOLIO
+  LINKEDIN
+}
+
+enum ScreeningJobEventType {
+  STATE_CHANGED
+  CANDIDATE_QUEUED
+  CANDIDATE_COMPLETED
+  CANDIDATE_FAILED
+  CANDIDATE_RETRIED
+  PROGRESS
+  ERROR
+}
+
+/* -------------------------------------------------------------------------- */
+/* Identity                                                                    */
+/* -------------------------------------------------------------------------- */
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  emailVerified Boolean  @default(false) @map("email_verified")
+  role          UserRole @default(USER)
+
+  fullName     String? @map("full_name")
+  headline     String?
+  phone        String?
+  location     String?
+  avatarUrl    String? @map("avatar_url")
+  linkedinUrl  String? @map("linkedin_url")
+  githubUrl    String? @map("github_url")
+  portfolioUrl String? @map("portfolio_url")
+
+  /// Google-authenticated accounts are considered verified.
+  googleConnected Boolean @default(false) @map("google_connected")
+  hasPassword     Boolean @default(false) @map("has_password")
+
+  /// GitHub evidence is fetched with an app-level token; a user OAuth token is
+  /// never stored in plain text (see docs/SECURITY.md).
+  githubUsername String? @map("github_username")
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  identities             AuthIdentity[]
+  wallet                 CreditWallet?
+  creditTransactions     CreditTransaction[]
+  creditReservations     CreditReservation[]
+  aiUsageRecords         AiUsageRecord[]
+  payments               PaymentTransaction[]
+  cvDocuments            CvDocument[]
+  cvAnalyses             CvAnalysis[]
+  enhancements           CvEnhancement[]
+  screeningJobs          ScreeningJob[]
+  recruiterPreference    RecruiterPreference?
+  preferenceVersions     RecruiterPreferenceVersion[]
+  testimonials           Testimonial[]  @relation("TestimonialAuthor")
+  moderatedTestimonials  Testimonial[]  @relation("TestimonialModerator")
+  integrationSnapshots   IntegrationEvidenceSnapshot[]
+  generatedReports       GeneratedReport[]
+  featurePricingUpdates  FeaturePricing[] @relation("FeaturePricingUpdatedBy")
+  creditAdjustments      CreditTransaction[] @relation("CreditAdjustmentActor")
+
+  @@index([role])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model AuthIdentity {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  provider       AuthProvider
+  /// Supabase subject ("sub") or a local development identifier.
+  providerUserId String       @map("provider_user_id")
+  email          String?
+
+  /// Development-only credential material (see AUTH_DEV_MODE). Production uses
+  /// Supabase Auth, and the API refuses to start with dev mode enabled in production.
+  passwordHash String? @map("password_hash")
+  passwordSalt String? @map("password_salt")
+
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("auth_identities")
+}
+
+/* -------------------------------------------------------------------------- */
+/* Credit economy                                                              */
+/* -------------------------------------------------------------------------- */
+
+model CreditWallet {
+  id     String @id @default(cuid())
+  userId String @unique @map("user_id")
+
+  /// Total credits owned. Invariant: balance >= reserved >= 0.
+  balance  Int @default(0)
+  /// Credits currently held by ACTIVE reservations.
+  reserved Int @default(0)
+
+  lifetimeCreditsIn    Int @default(0) @map("lifetime_credits_in")
+  lifetimeCreditsSpent Int @default(0) @map("lifetime_credits_spent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CreditTransaction[]
+  reservations CreditReservation[]
+
+  @@map("credit_wallets")
+}
+
+model CreditTransaction {
+  id       String                @id @default(cuid())
+  walletId String                @map("wallet_id")
+  userId   String                @map("user_id")
+  type     CreditTransactionType
+  /// Signed delta applied to the wallet balance.
+  amount   Int
+  /// Wallet balance immediately after this entry, for auditability.
+  balanceAfter Int               @map("balance_after")
+  /// Wallet balance immediately before this entry.
+  balanceBefore Int              @map("balance_before")
+
+  feature     String?
+  description String
+  referenceType String? @map("reference_type")
+  referenceId   String? @map("reference_id")
+
+  /// Prevents a double-charge when the same logical operation is retried.
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  aiUsageRecordId String? @map("ai_usage_record_id")
+
+  adjustedByUserId String? @map("adjusted_by_user_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  wallet         CreditWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adjustedByUser User?        @relation("CreditAdjustmentActor", fields: [adjustedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([userId, createdAt])
+  @@index([type])
+  @@index([feature])
+  @@map("credit_transactions")
+}
+
+model CreditReservation {
+  id       String @id @default(cuid())
+  walletId String @map("wallet_id")
+  userId   String @map("user_id")
+
+  feature         String
+  reservedCredits Int    @map("reserved_credits")
+  /// Final charge. Always <= reservedCredits.
+  settledCredits  Int?   @map("settled_credits")
+  state           ReservationState @default(ACTIVE)
+
+  referenceType String? @map("reference_type")
+  referenceId   String? @map("reference_id")
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  settledAt DateTime? @map("settled_at")
+
+  wallet    CreditWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  screeningJobs ScreeningJob[]
+
+  @@index([walletId, state])
+  @@index([userId, state])
+  @@index([referenceType, referenceId])
+  @@map("credit_reservations")
+}
+
+model FeaturePricing {
+  id      String @id @default(cuid())
+  feature String @unique
+  credits Int
+  updatedByUserId String? @map("updated_by_user_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  updatedByUser User? @relation("FeaturePricingUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("feature_pricing")
+}
+
+model AiUsageRecord {
+  id      String  @id @default(cuid())
+  userId  String? @map("user_id")
+  feature String
+
+  provider String
+  model    String
+  /// Runtime prompt version that produced this call (see docs/AI_PROMPTS.md).
+  promptVersion String? @map("prompt_version")
+  requestCount Int @default(1) @map("request_count")
+
+  inputTokens  Int @default(0) @map("input_tokens")
+  outputTokens Int @default(0) @map("output_tokens")
+  cachedTokens Int @default(0) @map("cached_tokens")
+
+  /// Provider cost in USD, computed from configurable provider pricing.
+  estimatedCostUsd Decimal? @map("estimated_cost_usd") @db.Decimal(12, 6)
+  /// Provider cost multiplied by AI_MARKUP_MULTIPLIER - internal margin analysis only.
+  targetRevenueUsd Decimal? @map("target_revenue_usd") @db.Decimal(12, 6)
+
+  creditsCharged Int @default(0) @map("credits_charged")
+
+  screeningJobId       String? @map("screening_job_id")
+  screeningCandidateId String? @map("screening_candidate_id")
+  cvEnhancementId      String? @map("cv_enhancement_id")
+
+  latencyMs Int? @map("latency_ms")
+  success   Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([feature, createdAt])
+  @@index([userId, createdAt])
+  @@index([model, createdAt])
+  @@map("ai_usage_records")
+}
+
+/* -------------------------------------------------------------------------- */
+/* Payments                                                                    */
+/* -------------------------------------------------------------------------- */
+
+model PaymentTransaction {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+
+  provider              String
+  /// Merchant-generated order id, unique per attempt.
+  orderId               String @unique @map("order_id")
+  providerTransactionId String? @map("provider_transaction_id")
+  providerReference     String? @map("provider_reference")
+
+  status    PaymentStatus @default(CREATED)
+  amountIdr Int           @map("amount_idr")
+  credits   Int
+
+  paymentUrl String? @map("payment_url")
+  qrString   String? @map("qr_string")
+
+  failureReason String? @map("failure_reason")
+
+  expiresAt   DateTime? @map("expires_at")
+  paidAt      DateTime? @map("paid_at")
+  completedAt DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events PaymentWebhookEvent[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([providerTransactionId])
+  @@map("payment_transactions")
+}
+
+/// Every inbound webhook is persisted before processing. The unique event key makes
+/// duplicate delivery a no-op, and replay of an already-processed event is rejected.
+model PaymentWebhookEvent {
+  id        String @id @default(cuid())
+  provider  String
+  eventKey  String @unique @map("event_key")
+  eventType String @map("event_type")
+
+  paymentTransactionId String? @map("payment_transaction_id")
+
+  payload      Json
+  signatureValid Boolean @default(false) @map("signature_valid")
+  processed    Boolean  @default(false)
+  processedAt  DateTime? @map("processed_at")
+  errorMessage String?  @map("error_message")
+
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  paymentTransaction PaymentTransaction? @relation(fields: [paymentTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([provider, receivedAt])
+  @@index([processed])
+  @@map("payment_webhook_events")
+}
+
+/* -------------------------------------------------------------------------- */
+/* CV documents, analyses and enhancements                                     */
+/* -------------------------------------------------------------------------- */
+
+model CvDocument {
+  id     String         @id @default(cuid())
+  userId String?        @map("user_id")
+  kind   CvDocumentKind @default(ORIGINAL)
+
+  fileName    String  @map("file_name")
+  mimeType    String  @map("mime_type")
+  sizeBytes   Int     @map("size_bytes")
+  pageCount   Int     @default(0) @map("page_count")
+
+  /// Extracted plain text. Sensitive personal data: never logged, deleted with the user.
+  textContent String? @map("text_content")
+  textHash    String? @map("text_hash")
+
+  /// Anonymous free-audit uploads are not retained: no row is created for them.
+  isEphemeral Boolean @default(false) @map("is_ephemeral")
+
+  sourceUrl String? @map("source_url")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user         User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses     CvAnalysis[]
+  enhancements CvEnhancement[] @relation("EnhancementSourceDocument")
+  outputs      CvEnhancement[] @relation("EnhancementResultDocument")
+
+  @@index([userId, createdAt])
+  @@index([textHash])
+  @@map("cv_documents")
+}
+
+model CvAnalysis {
+  id         String        @id @default(cuid())
+  documentId String?       @map("document_id")
+  userId     String?       @map("user_id")
+  kind       CvAnalysisKind
+
+  provider String
+  model    String
+  /// Runtime prompt version that produced this analysis; null for pre-versioning rows.
+  promptVersion String? @map("prompt_version")
+
+  atsScore Int @map("ats_score")
+
+  /// Full validated result payload (cvAuditResultSchema).
+  result Json
+
+  creditsCharged Int @default(0) @map("credits_charged")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  document CvDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("cv_analyses")
+}
+
+model CvEnhancement {
+  id               String            @id @default(cuid())
+  userId           String            @map("user_id")
+  sourceDocumentId String?           @map("source_document_id")
+  resultDocumentId String?           @map("result_document_id")
+
+  status EnhancementStatus @default(PENDING)
+
+  /// cvEnhancementOptionsSchema payload (target role, links, template).
+  options Json
+  /// cvEnhancementDocumentSchema payload once completed.
+  document Json?
+
+  templateKey String @default("ATS_MINIMAL") @map("template_key")
+
+  creditsCharged Int @default(0) @map("credits_charged")
+  reservationId  String? @map("reservation_id")
+
+  /// Runtime prompt that produced `document` (e.g. JOB_SEEKER_ENHANCE_V1).
+  promptVersion String? @map("prompt_version")
+
+  failureReason String? @map("failure_reason")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceDocument CvDocument? @relation("EnhancementSourceDocument", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  resultDocument CvDocument? @relation("EnhancementResultDocument", fields: [resultDocumentId], references: [id], onDelete: SetNull)
+  testimonials   Testimonial[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("cv_enhancements")
+}
+
+/* -------------------------------------------------------------------------- */
+/* Recruiter screening                                                         */
+/* -------------------------------------------------------------------------- */
+
+model RecruiterPreference {
+  id     String @id @default(cuid())
+  userId String @unique @map("user_id")
+
+  /// Monotonic version counter. Every update increments it.
+  version Int @default(1)
+
+  /// recruiterPreferencesSchema payload.
+  preferences Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("recruiter_preferences")
+}
+
+/// Immutable snapshot of a preference version, so a historical screening result can
+/// always be reproduced even after the recruiter edits their preferences.
+model RecruiterPreferenceVersion {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+  version Int
+
+  preferences Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, version])
+  @@map("recruiter_preference_versions")
+}
+
+model ScreeningJob {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+
+  title       String
+  description String
+  state       ScreeningJobState @default(CREATED)
+
+  /// Optional category weights; validated to total 100 when present.
+  categoryWeights Json? @map("category_weights")
+  screeningNotes  String? @map("screening_notes")
+
+  /// Frozen configuration for reproducibility.
+  scoringConfigurationVersion String @map("scoring_configuration_version")
+  preferenceVersion           Int    @map("preference_version")
+  requirementVersion          Int    @default(1) @map("requirement_version")
+  /// Runtime prompt version that produced this job's screening context.
+  promptVersion               String @default("HRD_SCREENING_V1") @map("prompt_version")
+
+  totalCandidates      Int @default(0) @map("total_candidates")
+  completedCandidates  Int @default(0) @map("completed_candidates")
+  failedCandidates     Int @default(0) @map("failed_candidates")
+
+  creditsReserved Int @default(0) @map("credits_reserved")
+  creditsCharged  Int @default(0) @map("credits_charged")
+
+  reservationId String? @map("reservation_id")
+
+  failureReason String? @map("failure_reason")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation CreditReservation?    @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  requirements ScreeningRequirement[]
+  candidates   ScreeningCandidate[]
+  reports      GeneratedReport[]
+  events       ScreeningJobEvent[]
+
+  @@index([userId, createdAt])
+  @@index([state])
+  @@map("screening_jobs")
+}
+
+model ScreeningRequirement {
+  id    String @id @default(cuid())
+  jobId String @map("job_id")
+
+  sortOrder        Int             @map("sort_order")
+  text             String
+  category         ScoringCategory  @default(OTHER)
+  requirementClass RequirementClass @default(REQUIRED)
+  weight           Int             @default(10)
+  hardRequirement  Boolean         @default(false) @map("hard_requirement")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job       ScreeningJob             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  criterion ScreeningCriterionResult[]
+
+  @@unique([jobId, sortOrder])
+  @@index([jobId])
+  @@map("screening_requirements")
+}
+
+model ScreeningCandidate {
+  id    String @id @default(cuid())
+  jobId String @map("job_id")
+
+  candidateName String  @map("candidate_name")
+  fileName      String  @map("file_name")
+  fileSizeBytes Int     @default(0) @map("file_size_bytes")
+
+  state CandidateState @default(QUEUED)
+  attempts Int @default(0)
+
+  /// Extracted CV text. Sensitive: belongs to the recruiter's uploaded batch.
+  cvText    String? @map("cv_text")
+  textHash  String? @map("text_hash")
+  pageCount Int     @default(0) @map("page_count")
+
+  score              Int?                @map("score")
+  eligibilityStatus  EligibilityStatus?  @map("eligibility_status")
+  verificationStatus VerificationStatus   @default(NOT_CHECKED) @map("verification_status")
+
+  summary      String?
+  gaps         Json?
+  uncertainties Json?
+  strengths    Json?
+
+  /// Structured worker output kept for auditability and retries.
+  analysisJson Json? @map("analysis_json")
+
+  failureReason String? @map("failure_reason")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  job       ScreeningJob              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  criteria  ScreeningCriterionResult[]
+  evidence  EvidenceItem[]
+
+  @@index([jobId, state])
+  @@index([jobId, score])
+  @@map("screening_candidates")
+}
+
+model ScreeningCriterionResult {
+  id          String @id @default(cuid())
+  candidateId String @map("candidate_id")
+  requirementId String @map("requirement_id")
+
+  status             EvidenceStatus
+  verificationStatus VerificationStatus @default(NOT_CHECKED) @map("verification_status")
+  confidence         Decimal            @db.Decimal(4, 3)
+  earnedScore        Decimal            @map("earned_score") @db.Decimal(5, 2)
+  normalisedWeight   Decimal            @map("normalised_weight") @db.Decimal(6, 5)
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  candidate   ScreeningCandidate   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  requirement ScreeningRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  evidence    EvidenceItem[]
+
+  @@unique([candidateId, requirementId])
+  @@index([candidateId])
+  @@map("screening_criterion_results")
+}
+
+model EvidenceItem {
+  id                String         @id @default(cuid())
+  candidateId       String         @map("candidate_id")
+  criterionResultId String?        @map("criterion_result_id")
+
+  /// Short snippet only - never a long copied section.
+  quote  String
+  source EvidenceSource
+  page   Int?
+  url    String?
+  note   String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  candidate       ScreeningCandidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  criterionResult ScreeningCriterionResult? @relation(fields: [criterionResultId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@index([criterionResultId])
+  @@map("evidence_items")
+}
+
+/// Cached external evidence (GitHub / portfolio) attached to a user profile.
+model IntegrationEvidenceSnapshot {
+  id            String              @id @default(cuid())
+  userId        String              @map("user_id")
+  provider      IntegrationProvider
+  sourceUrl     String              @map("source_url")
+
+  status        VerificationStatus  @default(NOT_CHECKED)
+  /// Structured summary returned by the provider adapter.
+  payload       Json?
+  failureReason String?             @map("failure_reason")
+
+  fetchedAt DateTime  @default(now()) @map("fetched_at")
+  expiresAt DateTime? @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider])
+  @@map("integration_evidence_snapshots")
+}
+
+model GeneratedReport {
+  id              String       @id @default(cuid())
+  screeningJobId  String       @map("screening_job_id")
+  createdByUserId String?      @map("created_by_user_id")
+
+  format   ReportFormat
+  fileName String @map("file_name")
+  mimeType String @map("mime_type")
+
+  sizeBytes   Int    @default(0) @map("size_bytes")
+  contentHash String? @map("content_hash")
+  /// Storage path when Supabase Storage is enabled; null means generated on demand.
+  storagePath String? @map("storage_path")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  screeningJob ScreeningJob @relation(fields: [screeningJobId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([screeningJobId, format])
+  @@map("generated_reports")
+}
+
+/// Append-only progress log. Powers admin "failed jobs" views and batch debugging.
+model ScreeningJobEvent {
+  id    String @id @default(cuid())
+  jobId String @map("job_id")
+
+  type    ScreeningJobEventType
+  message String?
+  payload Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job ScreeningJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([type, createdAt])
+  @@map("screening_job_events")
+}
+
+/* -------------------------------------------------------------------------- */
+/* Social proof                                                                */
+/* -------------------------------------------------------------------------- */
+
+model Testimonial {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+
+  rating      Int
+  comment     String
+  displayName String @map("display_name")
+
+  status TestimonialStatus @default(PENDING)
+
+  enhancementId String? @map("enhancement_id")
+  moderatedByUserId String? @map("moderated_by_user_id")
+  moderatedAt DateTime? @map("moderated_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user            User          @relation("TestimonialAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  moderatedByUser User?         @relation("TestimonialModerator", fields: [moderatedByUserId], references: [id], onDelete: SetNull)
+  enhancement     CvEnhancement? @relation(fields: [enhancementId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("testimonials")
+}
