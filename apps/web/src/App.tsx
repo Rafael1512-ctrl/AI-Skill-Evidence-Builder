@@ -2,18 +2,18 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 
-import { ProtectedRoute } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/components/ProtectedRoute.js';
-import { AuthProvider } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/lib/auth.js';
-import { AdminPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/AdminPage.js';
-import { AuditPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/AuditPage.js';
-import { CreditsPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/CreditsPage.js';
-import { EnhancePage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/EnhancePage.js';
-import { HomePage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/HomePage.js';
-import { ProfilePage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/ProfilePage.js';
-import { ScreeningJobPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/ScreeningJobPage.js';
-import { ScreeningPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/ScreeningPage.js';
-import { SignInPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/SignInPage.js';
-import { TestimonialsPage } from '../../../../../ai-skill-evidence-builder-main/apps/web/src/pages/TestimonialsPage.js';
+import { ProtectedRoute } from './components/ProtectedRoute.js';
+import { AuthProvider } from './lib/auth.js';
+import { AdminPage } from './pages/AdminPage.js';
+import { AuditPage } from './pages/AuditPage.js';
+import { CreditsPage } from './pages/CreditsPage.js';
+import { EnhancePage } from './pages/EnhancePage.js';
+import { HomePage } from './pages/HomePage.js';
+import { ProfilePage } from './pages/ProfilePage.js';
+import { ScreeningJobPage } from './pages/ScreeningJobPage.js';
+import { ScreeningPage } from './pages/ScreeningPage.js';
+import { SignInPage } from './pages/SignInPage.js';
+import { TestimonialsPage } from './pages/TestimonialsPage.js';
 
 function NotFoundPage() {
   return (
