@@ -1,0 +1,71 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Environment files - NEVER commit real secrets.
+# .env.example IS tracked on purpose.
+.env
+.env.*
+!.env.example
+# Committed on purpose: the offline values the browser suite must run with.
+!.env.e2e
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.vitest/
+apps/web/e2e/.auth/
+junit.xml
+
+# Prisma - generated client is recreated by `npm run gen`
+apps/api/src/generated/
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/prisma/generated/
+
+# Runtime artifacts
+uploads/
+tmp/
+.tmp/
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor caches
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+
+# Docker / local infra
+docker-compose.override.yml
+.postgres-data/
+.redis-data/
+
+# Misc
+.cache/
+.eslintcache
+
+#Mega Prompt
+Mega-Prompt-init.txt
+Mega-Prompt.txt
