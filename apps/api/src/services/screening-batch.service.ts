@@ -7,9 +7,11 @@ import {
 } from '@aseb/shared';
 
 import { env } from '../config/env.js';
-import type { ScreeningCandidate } from '../generated/prisma/client.js';
 import { getScreeningQueue } from '../queues/index.js';
-import { ScreeningRepository } from '../repositories/screening.repository.js';
+import {
+  ScreeningRepository,
+  type ScreeningCandidateSummarySource,
+} from '../repositories/screening.repository.js';
 import { AppError, isAppError } from '../utils/errors.js';
 import { hasZipSignature, validatePdfUpload } from '../utils/file-validation.js';
 import { sha256Hex } from '../utils/hash.js';
@@ -65,7 +67,7 @@ export function candidateNameFromFileName(fileName: string): string {
   return base.length > 0 ? base.slice(0, 200) : 'Kandidat';
 }
 
-function toCandidateSummary(candidate: ScreeningCandidate): ScreeningCandidateSummary {
+function toCandidateSummary(candidate: ScreeningCandidateSummarySource): ScreeningCandidateSummary {
   return {
     id: candidate.id,
     candidateName: candidate.candidateName,
@@ -259,7 +261,7 @@ export class ScreeningBatchService {
       referenceId: jobId,
     });
 
-    let created: ScreeningCandidate[];
+    let created: ScreeningCandidateSummarySource[];
     try {
       created = await this.repository.createCandidatesForJob({
         jobId,

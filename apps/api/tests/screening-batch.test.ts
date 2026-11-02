@@ -236,6 +236,32 @@ describe('screening batch upload API', () => {
     ]);
   });
 
+  it('stores the maximum ZIP batch in one transaction and preserves upload order', async () => {
+    const jobId = await createJob();
+    await grantCredits(100);
+    const candidates = Array.from({ length: LIMITS.MAX_SCREENING_CVS }, (_, index) => ({
+      name: `batch/kandidat-${String(index + 1).padStart(2, '0')}.pdf`,
+      data: buildTextPdf(CV_LINES),
+    }));
+
+    const response = await upload(jobId, [{ buffer: buildZip(candidates), name: 'batch.zip' }]);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    const batch = response.body.data.batch;
+    expect(batch.acceptedCount).toBe(LIMITS.MAX_SCREENING_CVS);
+    expect(batch.accepted.map((candidate: { fileName: string }) => candidate.fileName)).toEqual(
+      candidates.map((candidate) => candidate.name.split('/').pop()),
+    );
+    expect(await ctx.prisma.screeningCandidate.count({ where: { jobId } })).toBe(
+      LIMITS.MAX_SCREENING_CVS,
+    );
+    expect(
+      await ctx.prisma.screeningJobEvent.count({
+        where: { jobId, type: 'CANDIDATE_QUEUED' },
+      }),
+    ).toBe(LIMITS.MAX_SCREENING_CVS);
+  });
+
   it('reports a scanned PDF as rejected and 400s when nothing survives', async () => {
     const jobId = await createJob();
     await grantCredits(10);

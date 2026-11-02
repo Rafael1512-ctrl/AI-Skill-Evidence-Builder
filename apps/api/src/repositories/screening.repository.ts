@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
   EligibilityStatus,
   EvidenceSource,
@@ -61,6 +63,26 @@ export interface CreateCandidatesInput {
   reservationId: string;
   creditsReserved: number;
 }
+
+export type ScreeningCandidateSummarySource = Pick<
+  ScreeningCandidate,
+  | 'id'
+  | 'candidateName'
+  | 'fileName'
+  | 'fileSizeBytes'
+  | 'state'
+  | 'attempts'
+  | 'pageCount'
+  | 'score'
+  | 'eligibilityStatus'
+  | 'verificationStatus'
+  | 'failureReason'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+/** Bulk persistence gets a wider window than Prisma's 5-second interactive default. */
+const BATCH_TRANSACTION_TIMEOUT_MS = 15_000;
 
 export interface FinalizeJobInput {
   jobId: string;
@@ -259,56 +281,85 @@ export class ScreeningRepository {
    * written in one transaction: a batch can never be half-recorded, and the job can never
    * claim a reservation that does not exist.
    */
-  async createCandidatesForJob(input: CreateCandidatesInput): Promise<ScreeningCandidate[]> {
-    return getPrisma().$transaction(async (tx) => {
-      const created: ScreeningCandidate[] = [];
+  async createCandidatesForJob(
+    input: CreateCandidatesInput,
+  ): Promise<ScreeningCandidateSummarySource[]> {
+    return getPrisma().$transaction(
+      async (tx) => {
+        // Generate ids before the bulk write so the response keeps upload order without
+        // adding a sortable column to the schema.
+        const candidates = input.candidates.map((candidate) => ({
+          id: randomUUID(),
+          jobId: input.jobId,
+          candidateName: candidate.candidateName,
+          fileName: candidate.fileName,
+          fileSizeBytes: candidate.fileSizeBytes,
+          state: 'QUEUED' as const,
+          cvText: candidate.cvText,
+          textHash: candidate.textHash,
+          pageCount: candidate.pageCount,
+        }));
 
-      for (const candidate of input.candidates) {
-        const row = await tx.screeningCandidate.create({
-          data: {
+        await tx.screeningCandidate.createMany({ data: candidates });
+
+        await tx.screeningJobEvent.createMany({
+          data: candidates.map((candidate) => ({
             jobId: input.jobId,
-            candidateName: candidate.candidateName,
-            fileName: candidate.fileName,
-            fileSizeBytes: candidate.fileSizeBytes,
+            type: 'CANDIDATE_QUEUED' satisfies ScreeningJobEventType,
+            message: `Kandidat "${candidate.candidateName}" masuk antrean.`,
+            payload: toJson({ candidateId: candidate.id, fileName: candidate.fileName }),
+          })),
+        });
+
+        await tx.screeningJob.update({
+          where: { id: input.jobId },
+          data: {
             state: 'QUEUED',
-            cvText: candidate.cvText,
-            textHash: candidate.textHash,
-            pageCount: candidate.pageCount,
+            totalCandidates: { increment: candidates.length },
+            reservationId: input.reservationId,
+            creditsReserved: { increment: input.creditsReserved },
           },
         });
-        created.push(row);
 
         await tx.screeningJobEvent.create({
           data: {
             jobId: input.jobId,
-            type: 'CANDIDATE_QUEUED' satisfies ScreeningJobEventType,
-            message: `Kandidat "${row.candidateName}" masuk antrean.`,
-            payload: toJson({ candidateId: row.id, fileName: row.fileName }),
+            type: 'STATE_CHANGED' satisfies ScreeningJobEventType,
+            message: 'Batch kandidat diunggah dan masuk antrean.',
+            payload: toJson({ state: 'QUEUED', candidateCount: candidates.length }),
           },
         });
-      }
 
-      await tx.screeningJob.update({
-        where: { id: input.jobId },
-        data: {
-          state: 'QUEUED',
-          totalCandidates: { increment: created.length },
-          reservationId: input.reservationId,
-          creditsReserved: { increment: input.creditsReserved },
-        },
-      });
+        const created = await tx.screeningCandidate.findMany({
+          where: { id: { in: candidates.map((candidate) => candidate.id) } },
+          select: {
+            id: true,
+            candidateName: true,
+            fileName: true,
+            fileSizeBytes: true,
+            state: true,
+            attempts: true,
+            pageCount: true,
+            score: true,
+            eligibilityStatus: true,
+            verificationStatus: true,
+            failureReason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        const byId = new Map(created.map((candidate) => [candidate.id, candidate]));
 
-      await tx.screeningJobEvent.create({
-        data: {
-          jobId: input.jobId,
-          type: 'STATE_CHANGED' satisfies ScreeningJobEventType,
-          message: 'Batch kandidat diunggah dan masuk antrean.',
-          payload: toJson({ state: 'QUEUED', candidateCount: created.length }),
-        },
-      });
-
-      return created;
-    });
+        return candidates.map((candidate) => {
+          const row = byId.get(candidate.id);
+          if (!row) {
+            throw new Error(`Screening candidate ${candidate.id} missing right after batch insert`);
+          }
+          return row;
+        });
+      },
+      { timeout: BATCH_TRANSACTION_TIMEOUT_MS },
+    );
   }
 
   async listCandidates(input: {
