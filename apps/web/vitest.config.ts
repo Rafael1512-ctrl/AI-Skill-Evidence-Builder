@@ -1,22 +1,19 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Keep the browser tests independent from the developer's root `.env`. Instances that
+  // explicitly exercise Supabase opt in through `configureSupabaseEnv()`.
+  define: {
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(''),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(''),
+    'import.meta.env.VITE_API_BASE_URL': JSON.stringify(''),
+  },
   test: {
-    name: 'api',
-    environment: 'node',
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    name: 'web',
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./src/test/setup.ts'],
     testTimeout: 30_000,
     hookTimeout: 60_000,
-    // Each test file gets its own in-process database; run files sequentially to
-    // keep PGlite memory bounded and results deterministic.
-    fileParallelism: false,
-    // Tests never read the developer's .env file (see src/config/load-env.ts).
-    env: {
-      NODE_ENV: 'test',
-      AI_PROVIDER: 'mock',
-      PAYMENT_PROVIDER: 'mock',
-      OUTBOUND_HTTP_PROVIDER: 'mock',
-      LOG_LEVEL: 'silent',
-    },
   },
 });
