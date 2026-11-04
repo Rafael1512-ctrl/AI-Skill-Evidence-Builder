@@ -83,6 +83,10 @@ logged warning (see §4).
 cookies, webhook signatures, tokens, CV text and provider keys centrally
 (`utils/logger.ts`). Admin lists return no credential material.
 
+**Admin discovery.** The application navigation intentionally contains no admin link. `/admin` is
+opened directly and remains protected by `requireAuth` + `requireAdmin`; hiding the entry point is
+only a UX decision and is never treated as authorization.
+
 ## 3. Privacy
 
 - CV audits require an account and are persisted so the result can be opened from history;

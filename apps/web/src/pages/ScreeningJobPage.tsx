@@ -267,15 +267,15 @@ export function ScreeningJobPage() {
   const [verificationTarget, setVerificationTarget] = useState<VerificationTarget | null>(null);
 
   if (job.isPending) {
-    return <main className="mx-auto max-w-4xl px-6 py-16 text-sm">Memuat sesi…</main>;
+    return <div className="max-w-4xl text-sm">Memuat sesi…</div>;
   }
   if (job.isError) {
     return (
-      <main className="mx-auto max-w-4xl px-6 py-16">
+      <div className="max-w-4xl">
         <p role="alert" className="text-sm text-red-600">
           {(job.error as Error).message}
         </p>
-      </main>
+      </div>
     );
   }
   if (!detail) return null;
@@ -341,7 +341,7 @@ export function ScreeningJobPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
       <header className="flex flex-col gap-2">
         <Link to="/screening" className="text-sm text-[var(--color-brand)]">
           ← Semua sesi
@@ -592,6 +592,6 @@ export function ScreeningJobPage() {
           ) : null}
         </ConfirmDialog>
       ) : null}
-    </main>
+    </div>
   );
 }

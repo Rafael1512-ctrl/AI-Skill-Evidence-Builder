@@ -80,6 +80,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
     data: {
       analyses: analyses.items.map((analysis) => ({
         id: analysis.id,
+        documentId: analysis.documentId,
         kind: analysis.kind,
         atsScore: analysis.atsScore,
         provider: analysis.provider,
@@ -88,6 +89,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
       })),
       enhancements: enhancements.items.map((enhancement) => ({
         id: enhancement.id,
+        sourceDocumentId: enhancement.sourceDocumentId,
         status: enhancement.status,
         templateKey: enhancement.templateKey,
         creditsCharged: enhancement.creditsCharged,

@@ -99,8 +99,16 @@ contract, so a server change surfaces as a typed error rather than a broken scre
 TanStack Query owns server state (polling a running batch, invalidating after a mutation);
 the pages render the stored results and never recompute a derived number.
 
-Routes: `/` landing, `/audit` (session required), `/enhance`, `/profile`, `/credits`, `/screening`,
-`/screening/:jobId` (session required), `/signin`.
+Routes: `/` role-first landing, `/dashboard/job-seeker` and `/dashboard/hrd` (the same account can
+open either workspace), `/audit`, `/enhance`, `/profile`, `/credits`, `/screening`,
+`/screening/:jobId` and `/signin`. `/admin` is intentionally not linked from user navigation; it is
+entered directly and remains server-authorized.
+
+Both non-admin workspaces use `components/DashboardShell.tsx`: a responsive sidebar, shared wallet
+indicator, account menu and a workspace switcher. Role selection is a UI preference, not an account
+role. The Job Seeker dashboard provides audit/enhancement quick actions plus stored-CV history and
+deletion; the HRD dashboard summarizes screening sessions and links to the create/read/cancel/report
+flow.
 
 ## Containers (Phase 21)
 

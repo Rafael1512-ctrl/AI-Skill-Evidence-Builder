@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 
+import { DashboardShell } from './components/DashboardShell.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { AuthProvider } from './lib/auth.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AuditPage } from './pages/AuditPage.js';
 import { CreditsPage } from './pages/CreditsPage.js';
 import { EnhancePage } from './pages/EnhancePage.js';
+import { HrdDashboardPage } from './pages/HrdDashboardPage.js';
 import { HomePage } from './pages/HomePage.js';
+import { JobSeekerDashboardPage } from './pages/JobSeekerDashboardPage.js';
 import { ProfilePage } from './pages/ProfilePage.js';
 import { ScreeningJobPage } from './pages/ScreeningJobPage.js';
 import { ScreeningPage } from './pages/ScreeningPage.js';
@@ -53,7 +56,29 @@ export function App() {
               path="/audit"
               element={
                 <ProtectedRoute>
-                  <AuditPage />
+                  <DashboardShell role="job-seeker">
+                    <AuditPage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/job-seeker"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="job-seeker">
+                    <JobSeekerDashboardPage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/hrd"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="hrd">
+                    <HrdDashboardPage />
+                  </DashboardShell>
                 </ProtectedRoute>
               }
             />
@@ -71,7 +96,9 @@ export function App() {
               path="/enhance"
               element={
                 <ProtectedRoute>
-                  <EnhancePage />
+                  <DashboardShell role="job-seeker">
+                    <EnhancePage />
+                  </DashboardShell>
                 </ProtectedRoute>
               }
             />
@@ -87,7 +114,9 @@ export function App() {
               path="/screening"
               element={
                 <ProtectedRoute>
-                  <ScreeningPage />
+                  <DashboardShell role="hrd">
+                    <ScreeningPage />
+                  </DashboardShell>
                 </ProtectedRoute>
               }
             />
@@ -95,7 +124,9 @@ export function App() {
               path="/screening/:jobId"
               element={
                 <ProtectedRoute>
-                  <ScreeningJobPage />
+                  <DashboardShell role="hrd">
+                    <ScreeningJobPage />
+                  </DashboardShell>
                 </ProtectedRoute>
               }
             />

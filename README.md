@@ -32,6 +32,8 @@ requirement stay visible instead of silently disappearing.
 
 **Shared**
 
+- Role-first landing page with separate Job Seeker and HRD dashboards, while one account can
+  open both workspaces and use the same credit wallet.
 - One wallet, one ledger, no subscriptions. Top-up from Rp50.000 (50 credits).
 - Working top-up flow: checkout, a signature-verified idempotent webhook, and credits granted
   only through the ledger. The offline `mock` provider settles end-to-end in development;
@@ -39,6 +41,8 @@ requirement stay visible instead of silently disappearing.
 - Testimonials with moderation.
 - Admin console: users, wallets, transactions, payments, AI usage, jobs, failed jobs, testimonials,
   feature pricing, system health.
+- The admin console has no visible navigation entry; administrators open `/admin` directly and the
+  API continues to enforce the stored admin role.
 
 ---
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { signInSchema, signUpSchema } from '@aseb/shared';
 import type { ZodError } from 'zod';
 
@@ -33,8 +33,15 @@ function failureMessage(cause: unknown): string {
 export function SignInPage() {
   const { signIn, signUp, signInWithGoogle, status, mode, authError } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedNext = searchParams.get('next');
+  const destination =
+    requestedNext?.startsWith('/dashboard/') === true ? requestedNext : '/profile';
+  const selectedWorkspace = destination.includes('/hrd') ? 'HRD' : 'Pencari Kerja';
 
-  const [tab, setTab] = useState<Tab>('sign-in');
+  const [tab, setTab] = useState<Tab>(() =>
+    searchParams.get('tab') === 'sign-up' ? 'sign-up' : 'sign-in',
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -43,8 +50,8 @@ export function SignInPage() {
   const [pending, setPending] = useState<Pending>(null);
 
   useEffect(() => {
-    if (status === 'signed-in') navigate('/profile', { replace: true });
-  }, [status, navigate]);
+    if (status === 'signed-in') navigate(destination, { replace: true });
+  }, [status, destination, navigate]);
 
   function switchTab(next: Tab): void {
     setTab(next);
@@ -125,7 +132,9 @@ export function SignInPage() {
       <div>
         <h1 className="text-2xl font-semibold">Masuk</h1>
         <p className="mt-1 text-sm text-[var(--color-content-muted)]">
-          Gunakan akun Anda untuk mengelola profil dan kredit.
+          {requestedNext?.startsWith('/dashboard/')
+            ? `Masuk untuk membuka workspace ${selectedWorkspace}. Akun yang sama juga dapat membuka workspace lainnya.`
+            : 'Gunakan akun Anda untuk mengelola profil dan kredit.'}
         </p>
       </div>
 

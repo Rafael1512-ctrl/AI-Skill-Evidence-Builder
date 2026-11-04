@@ -53,15 +53,16 @@ function respondWithProfile(): void {
   }));
 }
 
-function renderSignIn() {
+function renderSignIn(path = '/signin') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <MemoryRouter initialEntries={['/signin']}>
+        <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/signin" element={<SignInPage />} />
             <Route path="/profile" element={<p>Halaman profil</p>} />
+            <Route path="/dashboard/job-seeker" element={<p>Dashboard pencari kerja</p>} />
           </Routes>
         </MemoryRouter>
       </AuthProvider>
@@ -137,6 +138,24 @@ describe('SignInPage', () => {
       password: 'secret123',
     });
     expect(await screen.findByText('Halaman profil')).toBeInTheDocument();
+  });
+
+  it('continues to the workspace selected on the homepage', async () => {
+    configureSupabaseEnv();
+    respondWithProfile();
+    supabaseAuth.signInWithPassword.mockResolvedValueOnce({
+      data: { session: { access_token: 'password-token' }, user: null },
+      error: null,
+    });
+
+    const { user } = renderSignIn('/signin?next=%2Fdashboard%2Fjob-seeker');
+
+    expect(screen.getByText(/membuka workspace pencari kerja/i)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Email'), 'siti@example.com');
+    await user.type(screen.getByLabelText('Kata sandi'), 'secret123');
+    await user.click(screen.getByRole('button', { name: 'Masuk' }));
+
+    expect(await screen.findByText('Dashboard pencari kerja')).toBeInTheDocument();
   });
 
   it('signs up through Supabase and asks for email confirmation when required', async () => {

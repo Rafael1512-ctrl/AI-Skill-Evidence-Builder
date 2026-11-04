@@ -250,7 +250,7 @@ export function AuditPage() {
     !localError && audit.error instanceof ApiError ? `Kode: ${audit.error.code}` : null;
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-6 px-6 py-12">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <div>
         <p className="text-sm font-medium tracking-wide text-[var(--color-brand)] uppercase">
           Pencari Kerja
@@ -375,6 +375,6 @@ export function AuditPage() {
       <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
         ← Kembali ke beranda
       </Link>
-    </main>
+    </div>
   );
 }

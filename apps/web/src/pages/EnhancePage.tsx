@@ -369,7 +369,7 @@ export function EnhancePage() {
 
   if (status !== 'signed-in') {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-3xl flex-col justify-center gap-4 px-6 py-12">
+      <div className="mx-auto flex max-w-3xl flex-col justify-center gap-4">
         <h1 className="text-3xl font-semibold tracking-tight">Peningkatan CV Berbayar</h1>
         <p className="text-[var(--color-content-muted)]">
           Masuk terlebih dahulu untuk menyempurnakan CV. Setiap penyempurnaan memakai kredit dari
@@ -378,12 +378,12 @@ export function EnhancePage() {
         <Link to="/signin" className="font-medium text-[var(--color-brand)]">
           Masuk atau daftar
         </Link>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-6 px-6 py-12">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div>
         <p className="text-sm font-medium tracking-wide text-[var(--color-brand)] uppercase">
           Pencari Kerja
@@ -550,6 +550,6 @@ export function EnhancePage() {
       <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
         ← Kembali ke beranda
       </Link>
-    </main>
+    </div>
   );
 }

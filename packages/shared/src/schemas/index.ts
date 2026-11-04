@@ -5,6 +5,7 @@ export * from './credits.js';
 export * from './cv-audit.js';
 export * from './cv-enhancement.js';
 export * from './cv-export.js';
+export * from './cv-history.js';
 export * from './payments.js';
 export * from './profile.js';
 export * from './screening.js';

@@ -22,6 +22,11 @@ Addendum 2026-11-04: the CV audit now requires an account. Each account receives
 per Jakarta calendar day, tracked as zero-credit reservations; further audits reserve and settle the
 admin-editable `CV_DEEP_ANALYSIS` price. The former per-IP guest limiter and anonymous in-memory
 audit path are retired (§8.64).
+Addendum 2026-11-04 (b): the web UI now uses a role-first landing page and dashboard shell. An
+account can open both `/dashboard/job-seeker` and `/dashboard/hrd` because role is a workspace
+choice, not an authorization role; both spend from the same credit wallet. The admin console has no
+visible navigation entry and remains reachable only by opening `/admin`, where the server still
+enforces `requireAdmin`. No API schema or database migration was needed (§8.65).
 
 **Workflow rule in force:** work phase by phase and stop at the end of every phase for explicit
 approval. Do not begin the next phase until the owner says `Lanjutkan Phase N`.
@@ -524,7 +529,7 @@ apps/web            React 19 + Vite 8 + Tailwind v4
   src/pages         HomePage, SignInPage, ProfilePage, CreditsPage, AuditPage, EnhancePage,
                     ScreeningPage, ScreeningJobPage, TestimonialsPage (+ TestimonialForm),
                     AdminPage
-  src/components    ProtectedRoute
+  src/components    ProtectedRoute, DashboardShell (responsive role workspace + shared wallet)
   src/App.tsx       providers (TanStack Query, auth) + React Router 7 routes
   e2e/              Playwright specs
   Dockerfile        Vite build served by nginx; nginx.conf proxies /api (Phase 21)
@@ -1537,6 +1542,16 @@ dev:worker` plus one uploaded batch is enough.
     settles `CV_DEEP_ANALYSIS` (2 credits by default, admin-overridable) and is stored as
     `CvAnalysis.kind = DEEP_ANALYSIS`. `GET /api/cv/audit/usage` exposes remaining quota, reset time,
     effective price and available credits. No schema change was needed.
+65. **The dashboard UI is role-first while authorization stays account-based** (2026-11-04). `/` now
+    explains the product, shows a code-native dashboard preview and asks the visitor to choose Job
+    Seeker or HRD before login. Both dashboards are ordinary protected pages for any signed-in
+    account; switching workspace never changes the wallet or account role. Job Seeker receives a
+    CRUD-style summary over stored audits/enhancements and can soft-delete source documents. HRD
+    receives screening metrics, recent sessions and the existing create/read/cancel/report flow.
+    The admin navigation link was removed from every public/user surface, so `/admin` must be typed
+    directly and remains guarded by the server. No raster asset generator was available in this
+    environment, so the homepage visual is rendered from React/Tailwind rather than adding an
+    external image dependency.
 
 ---
 

@@ -162,7 +162,11 @@ describe('CV audit API', () => {
     const history = await request(app).get('/api/cv/history').set(bearer(session));
     expect(history.status).toBe(200);
     expect(history.body.data.analyses).toHaveLength(1);
-    expect(history.body.data.analyses[0]).toMatchObject({ id: auditId, kind: 'FREE_AUDIT' });
+    expect(history.body.data.analyses[0]).toMatchObject({
+      id: auditId,
+      kind: 'FREE_AUDIT',
+      documentId: expect.any(String),
+    });
     expect(history.body.data.totals).toEqual({ analyses: 1, enhancements: 0 });
 
     const detail = await request(app).get(`/api/cv/analyses/${auditId}`).set(bearer(session));
