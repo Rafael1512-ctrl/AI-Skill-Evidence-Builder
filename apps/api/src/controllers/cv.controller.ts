@@ -31,10 +31,11 @@ export function testRoute(_req: Request, res: Response): void {
 /**
  * POST /api/cv/audit
  *
- * Free for everyone (guests included) and always 0 credits. Anonymous uploads are
- * processed in memory and are not persisted.
+ * Authenticated only. The first five audits each Jakarta calendar day are free; later
+ * audits reserve and settle the published additional-audit price.
  */
 export async function auditCv(req: Request, res: Response): Promise<void> {
+  const auth = currentAuth(req);
   const file = req.file;
   if (!file) {
     throw AppError.validation({ field: 'file' }, 'Tidak ada file PDF yang diunggah!');
@@ -47,10 +48,17 @@ export async function auditCv(req: Request, res: Response): Promise<void> {
       size: file.size,
       buffer: file.buffer,
     },
-    userId: req.auth?.userId ?? null,
+    userId: auth.userId,
   });
 
   res.status(200).json({ data: response });
+}
+
+/** GET /api/cv/audit/usage - free quota and effective price for the signed-in account. */
+export async function getAuditUsage(req: Request, res: Response): Promise<void> {
+  const auth = currentAuth(req);
+  const usage = await cvAuditService.getUsage(auth.userId);
+  res.json({ data: usage });
 }
 
 /** GET /api/cv/templates - the three MVP export templates. */

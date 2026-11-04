@@ -33,13 +33,13 @@ export const DEFAULT_FEATURE_PRICING: Readonly<Record<FeatureKey, FeaturePricing
   FREE_CV_AUDIT: {
     credits: 0,
     label: 'Audit CV Gratis',
-    description: 'Analisis awal CV tanpa biaya kredit, tersedia juga untuk tamu.',
+    description: 'Lima audit CV gratis per hari untuk akun yang sudah masuk.',
     sortOrder: 10,
   },
   CV_DEEP_ANALYSIS: {
     credits: 2,
-    label: 'Analisis CV Mendalam',
-    description: 'Analisis tambahan yang lebih rinci untuk CV yang sudah tersimpan.',
+    label: 'Audit CV Tambahan',
+    description: 'Audit CV berikutnya setelah kuota gratis lima audit per hari habis.',
     sortOrder: 20,
   },
   CV_ENHANCEMENT: {

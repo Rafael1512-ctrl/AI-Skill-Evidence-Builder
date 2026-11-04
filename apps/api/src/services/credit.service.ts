@@ -72,6 +72,16 @@ export class CreditService {
     return this.toWallet(wallet);
   }
 
+  /** Counts active or settled reservations for quota/usage reporting. */
+  async countReservationsInWindow(input: {
+    userId: string;
+    feature: FeatureKey;
+    from: Date;
+    to: Date;
+  }): Promise<number> {
+    return this.repository.countReservationsInWindow(input);
+  }
+
   /** Preflight: how much would this cost, and can the user afford it? */
   async estimate(userId: string, feature: FeatureKey, quantity = 1): Promise<CostEstimate> {
     const wallet = await this.getWallet(userId);
@@ -104,7 +114,8 @@ export class CreditService {
   /** Atomically holds credits for a pending operation. */
   async reserve(input: ReserveCreditsInput): Promise<CreditReservation> {
     const wallet = await this.repository.ensureWallet(input.userId);
-    const credits = input.credits ?? (await this.pricing.resolveTotal(input.feature, input.quantity ?? 1));
+    const credits =
+      input.credits ?? (await this.pricing.resolveTotal(input.feature, input.quantity ?? 1));
 
     if (credits <= 0) {
       // Free features still get a reservation row so the flow stays uniform.
@@ -145,7 +156,9 @@ export class CreditService {
    * Partial-batch rule: unprocessed CVs are never charged, and their hold is
    * released. Failing before any billable AI usage releases everything.
    */
-  async settle(input: SettleInput): Promise<{ charged: number; released: number; alreadySettled: boolean }> {
+  async settle(
+    input: SettleInput,
+  ): Promise<{ charged: number; released: number; alreadySettled: boolean }> {
     const reservation = await this.repository.findReservation(input.reservationId);
     if (!reservation) throw AppError.notFound('Reservasi kredit tidak ditemukan.');
 
@@ -166,7 +179,10 @@ export class CreditService {
     });
   }
 
-  async release(reservationId: string, reason: string): Promise<{ released: number; alreadyReleased: boolean }> {
+  async release(
+    reservationId: string,
+    reason: string,
+  ): Promise<{ released: number; alreadyReleased: boolean }> {
     return this.repository.releaseReservation({ reservationId, reason });
   }
 
@@ -180,7 +196,10 @@ export class CreditService {
     const wallet = await this.repository.ensureWallet(input.userId);
 
     if (input.credits <= 0) {
-      throw AppError.validation({ credits: input.credits }, 'Jumlah kredit top-up harus lebih dari nol.');
+      throw AppError.validation(
+        { credits: input.credits },
+        'Jumlah kredit top-up harus lebih dari nol.',
+      );
     }
 
     const result = await this.repository.applyDeltaWithLedger(

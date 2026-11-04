@@ -60,8 +60,8 @@ export type CvExtractionMeta = z.infer<typeof cvExtractionMetaSchema>;
 
 export const cvAuditResultSchema = cvAuditAnalysisSchema.extend({
   extraction: cvExtractionMetaSchema,
-  /** Always true for the free guest flow: uploads are not retained. */
-  ephemeral: z.boolean().default(true),
+  /** Retained for historical rows. Current account-backed audits are always false. */
+  ephemeral: z.boolean().default(false),
   analyzedAt: z.string(),
   provider: z.string(),
   model: z.string(),
@@ -71,9 +71,33 @@ export const cvAuditResultSchema = cvAuditAnalysisSchema.extend({
 
 export type CvAuditResult = z.infer<typeof cvAuditResultSchema>;
 
+export const auditQuotaSchema = z.object({
+  freeAuditsLimit: z.number().int().min(1),
+  freeAuditsUsed: z.number().int().min(0),
+  freeAuditsRemaining: z.number().int().min(0),
+  /** End of the current Jakarta calendar day, as an ISO timestamp. */
+  resetsAt: z.string(),
+  /** Effective, admin-editable price of an audit after the free quota is exhausted. */
+  paidAuditCredits: z.number().int().min(0),
+});
+
+export const cvAuditUsageSchema = auditQuotaSchema.extend({
+  availableCredits: z.number().int().min(0),
+});
+
+export type CvAuditUsage = z.infer<typeof cvAuditUsageSchema>;
+
+export const cvAuditBillingSchema = auditQuotaSchema.extend({
+  mode: z.enum(['FREE', 'PAID']),
+  creditsCharged: z.number().int().min(0),
+});
+
+export type CvAuditBilling = z.infer<typeof cvAuditBillingSchema>;
+
 export const cvAuditResponseSchema = z.object({
-  auditId: z.string().nullable(),
+  auditId: z.string(),
   result: cvAuditResultSchema,
+  billing: cvAuditBillingSchema,
 });
 
 export type CvAuditResponse = z.infer<typeof cvAuditResponseSchema>;

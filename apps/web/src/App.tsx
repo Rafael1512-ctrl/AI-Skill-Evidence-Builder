@@ -49,7 +49,14 @@ export function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/signin" element={<SignInPage />} />
-            <Route path="/audit" element={<AuditPage />} />
+            <Route
+              path="/audit"
+              element={
+                <ProtectedRoute>
+                  <AuditPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/credits" element={<CreditsPage />} />
             <Route path="/testimonials" element={<TestimonialsPage />} />
             <Route

@@ -71,11 +71,11 @@ describe('API application', () => {
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('rejects a CV audit without a file', async () => {
+  it('requires authentication before a CV audit file is parsed', async () => {
     const response = await request(app).post('/api/cv/audit');
 
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
   });
 
   it('does not reflect CORS origins that are not allowlisted', async () => {

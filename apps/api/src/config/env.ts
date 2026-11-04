@@ -81,8 +81,6 @@ const envSchema = z.object({
     .min(1024)
     .default(250 * 1024 * 1024),
   MAX_ZIP_COMPRESSION_RATIO: z.coerce.number().int().min(1).default(120),
-  GUEST_AUDIT_RATE_LIMIT: z.coerce.number().int().min(1).default(3),
-  GUEST_AUDIT_RATE_WINDOW_MINUTES: z.coerce.number().int().min(1).default(60),
   API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
   EXTERNAL_FETCH_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(8_000),
   EXTERNAL_FETCH_MAX_BYTES: z.coerce

@@ -99,7 +99,7 @@ contract, so a server change surfaces as a typed error rather than a broken scre
 TanStack Query owns server state (polling a running batch, invalidating after a mutation);
 the pages render the stored results and never recompute a derived number.
 
-Routes: `/` landing, `/audit` (public), `/enhance`, `/profile`, `/credits`, `/screening`,
+Routes: `/` landing, `/audit` (session required), `/enhance`, `/profile`, `/credits`, `/screening`,
 `/screening/:jobId` (session required), `/signin`.
 
 ## Containers (Phase 21)

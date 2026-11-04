@@ -6,14 +6,14 @@
 
 ## 1. Assets
 
-| Asset                                | Why it matters                                                         |
-| ------------------------------------ | ---------------------------------------------------------------------- |
-| CV contents and extracted text       | Sensitive personal data, including data about people who never signed up |
-| Account identity and sessions        | Takeover would expose a wallet, history and screening results           |
-| Credit balances and the ledger       | Money. Every change must be attributable and balances can never go negative |
-| Payment transactions and webhooks    | Forged events would mint credits                                        |
-| Screening results and reports        | A recruiter's confidential hiring material                              |
-| Provider credentials (`DEEPSEEK_*`, `MIDTRANS_*`, `SUPABASE_SERVICE_ROLE_KEY`) | Cost and account compromise          |
+| Asset                                                                          | Why it matters                                                              |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| CV contents and extracted text                                                 | Sensitive personal data, including data about people who never signed up    |
+| Account identity and sessions                                                  | Takeover would expose a wallet, history and screening results               |
+| Credit balances and the ledger                                                 | Money. Every change must be attributable and balances can never go negative |
+| Payment transactions and webhooks                                              | Forged events would mint credits                                            |
+| Screening results and reports                                                  | A recruiter's confidential hiring material                                  |
+| Provider credentials (`DEEPSEEK_*`, `MIDTRANS_*`, `SUPABASE_SERVICE_ROLE_KEY`) | Cost and account compromise                                                 |
 
 ## 2. Threat model
 
@@ -68,8 +68,10 @@ quotes are grounded against the stored source and can only be downgraded, never 
 are versioned (`SCORING_ENGINE_VERSION`).
 
 **Abuse.** Fixed-window rate limits cover the generic API surface, the development credential
-routes, the guest audit (per IP), profile linking and testimonial submission (per account, 5 per
-day). Every limiter carries its own counter namespace (`rateLimit({ scope })`): they share one
+routes, profile linking and testimonial submission (per account, 5 per day). CV audit usage is
+account-scoped rather than IP-scoped: five free audits per Jakarta calendar day are tracked as
+zero-credit reservations, and later audits use the ledger-backed paid feature price. Every limiter
+carries its own counter namespace (`rateLimit({ scope })`): they share one
 store, so an unscoped limiter would count the same bucket as the generic API surface and the
 strictest limit would reject unrelated traffic (`PROJECT_CONTEXT.md` §8.62). Counters live behind
 `RateLimitStore`, which is process-local by default and **shared through Redis when `REDIS_URL` is
@@ -83,7 +85,8 @@ cookies, webhook signatures, tokens, CV text and provider keys centrally
 
 ## 3. Privacy
 
-- Anonymous audits are processed in memory and are not persisted.
+- CV audits require an account and are persisted so the result can be opened from history;
+  users can delete a stored document.
 - Signed-in CV text is stored because the product needs it (enhancement, screening evidence,
   reproducibility); users can delete a stored document, which cascades.
 - Screening batches belong to the recruiter's account and are scoped to it on every read.
@@ -93,15 +96,15 @@ cookies, webhook signatures, tokens, CV text and provider keys centrally
 
 ## 4. Accepted risks
 
-| Risk                                                                 | Why it is accepted today                                                                                   |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Rate limiting fails open when its store is unreachable                | Availability first; the failure is logged as a warning. Documented, not silent.                             |
-| No second admin role tier (read-only/support)                         | A schema change; until then admin is all-or-nothing (`PROJECT_CONTEXT.md` §8.42).                           |
-| Exported PDFs and reports are streamed, only metadata is stored       | No storage provider yet; the row keeps size + SHA-256 so an export is auditable (§8.31).                    |
-| Verification statuses do not cross-check a specific CV claim          | `CONFLICTING_INFORMATION` would need claim extraction + matching (§8.34).                                   |
-| In-process queue when `REDIS_URL` is unset                            | Single-container MVP; the same switch that shares rate limits enables the BullMQ driver.                     |
-| The guarded fetcher has never run against the real internet in tests  | No outbound network in the build environment; DNS/redirect/size logic is unit-tested (§8.36).                |
-| Pre-existing web test failures in three page suites                   | Unrelated to features and tracked (§8.15); the API and the other web suites are green.                        |
+| Risk                                                                 | Why it is accepted today                                                                      |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Rate limiting fails open when its store is unreachable               | Availability first; the failure is logged as a warning. Documented, not silent.               |
+| No second admin role tier (read-only/support)                        | A schema change; until then admin is all-or-nothing (`PROJECT_CONTEXT.md` §8.42).             |
+| Exported PDFs and reports are streamed, only metadata is stored      | No storage provider yet; the row keeps size + SHA-256 so an export is auditable (§8.31).      |
+| Verification statuses do not cross-check a specific CV claim         | `CONFLICTING_INFORMATION` would need claim extraction + matching (§8.34).                     |
+| In-process queue when `REDIS_URL` is unset                           | Single-container MVP; the same switch that shares rate limits enables the BullMQ driver.      |
+| The guarded fetcher has never run against the real internet in tests | No outbound network in the build environment; DNS/redirect/size logic is unit-tested (§8.36). |
+| Pre-existing web test failures in three page suites                  | Unrelated to features and tracked (§8.15); the API and the other web suites are green.        |
 
 ## 5. Production checklist
 

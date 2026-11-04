@@ -12,9 +12,8 @@ export const LIMITS = {
   MAX_ZIP_UNCOMPRESSED_BYTES: 250 * 1024 * 1024,
   /** Reject archives whose compression ratio suggests a zip bomb. */
   MAX_ZIP_COMPRESSION_RATIO: 120,
-  /** Guest free-audit allowance per IP per window. */
-  GUEST_AUDIT_RATE_LIMIT: 3,
-  GUEST_AUDIT_RATE_WINDOW_MINUTES: 60,
+  /** Free CV audits available to one account per Jakarta calendar day. */
+  FREE_CV_AUDITS_PER_DAY: 5,
   /** Generic API rate limit. */
   API_RATE_LIMIT_PER_MINUTE: 120,
   /** Request body ceiling for JSON payloads. */

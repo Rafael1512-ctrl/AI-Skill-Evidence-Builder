@@ -12,12 +12,12 @@ import { stopTestDatabase, useTestDatabase } from './helpers/db.js';
 import { buildEmptyPdf, buildTextPdf } from './helpers/pdf.js';
 
 /**
- * End-to-end coverage of the free CV audit.
+ * End-to-end coverage of the authenticated CV audit.
  *
  * The audit is the first surface the runtime prompt layer reaches, so these tests pin
- * both halves of the contract: the HTTP/file behaviour (guests get 0-credit ephemeral
- * results, signed-in users get a stored, auditable analysis) and the fact that failures
- * never leave partial rows or charge credits.
+ * both halves of the contract: authentication plus the five-per-day free quota, the paid
+ * additional-audit path through the ledger, and the fact that failures never leave
+ * partial rows or charge credits.
  */
 
 /** Enough extractable text to pass the "not a scan" check (>= 60 chars, >= 12 words). */
@@ -52,43 +52,58 @@ describe('CV audit API', () => {
   });
 
   function upload(buffer: Buffer, fileName = 'cv.pdf') {
+    return request(app).post('/api/cv/audit').set(bearer(session)).attach('file', buffer, fileName);
+  }
+
+  function uploadAnonymous(buffer: Buffer, fileName = 'cv.pdf') {
     return request(app).post('/api/cv/audit').attach('file', buffer, fileName);
   }
 
-  it('answers a guest with a versioned, ephemeral result and persists no CV data', async () => {
-    const response = await upload(buildTextPdf(CV_LINES));
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.auditId).toBeNull();
-
-    const parsed = cvAuditResponseSchema.safeParse(response.body.data);
-    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
-    expect(response.body.data.result).toMatchObject({
-      ephemeral: true,
-      provider: 'mock',
-      promptVersion: 'JOB_SEEKER_AUDIT_V1',
+  async function topUp(credits = 10) {
+    const { creditService } = await import('../src/services/credit.service.js');
+    await creditService.grantTopUp({
+      userId: session.userId,
+      credits,
+      amountIdr: credits * 1_000,
+      paymentTransactionId: `audit-test-${session.userId}-${Math.random()}`,
     });
-    expect(response.body.data.result.extraction).toMatchObject({
-      fileName: 'cv.pdf',
-      detectedLanguage: null,
-    });
-    expect(response.body.data.result.extraction.pageCount).toBeGreaterThanOrEqual(1);
-    expect(response.body.data.result.atsScore).toBeGreaterThan(0);
+  }
 
-    // The upload is processed in memory: no document, no analysis, no ledger movement.
+  it('requires a signed-in account for both audit usage and uploads', async () => {
+    const usage = await request(app).get('/api/cv/audit/usage');
+    expect(usage.status).toBe(401);
+    expect(usage.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    const response = await uploadAnonymous(buildTextPdf(CV_LINES));
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
     expect(await ctx.prisma.cvDocument.count()).toBe(0);
     expect(await ctx.prisma.cvAnalysis.count()).toBe(0);
-    expect(await ctx.prisma.creditTransaction.count()).toBe(0);
+  });
 
-    // Provider-cost accounting still happens, attributed to nobody and costed at 0 credits.
-    const usage = await ctx.prisma.aiUsageRecord.findMany();
-    expect(usage).toHaveLength(1);
-    expect(usage[0]).toMatchObject({
-      userId: null,
-      feature: 'FREE_CV_AUDIT',
-      creditsCharged: 0,
-      promptVersion: 'JOB_SEEKER_AUDIT_V1',
+  it('reports five free audits for a fresh account', async () => {
+    const response = await request(app).get('/api/cv/audit/usage').set(bearer(session));
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      freeAuditsLimit: LIMITS.FREE_CV_AUDITS_PER_DAY,
+      freeAuditsUsed: 0,
+      freeAuditsRemaining: LIMITS.FREE_CV_AUDITS_PER_DAY,
+      paidAuditCredits: 2,
+      availableCredits: 0,
     });
+    expect(new Date(response.body.data.resetsAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('uses Jakarta midnight rather than the server timezone for the quota window', async () => {
+    const { auditDayWindow } = await import('../src/services/cv-audit.service.js');
+    const beforeMidnight = auditDayWindow(new Date('2026-11-04T16:59:59.999Z'));
+    const atMidnight = auditDayWindow(new Date('2026-11-04T17:00:00.000Z'));
+
+    expect(beforeMidnight.dateKey).toBe('2026-11-04');
+    expect(beforeMidnight.resetsAt).toBe('2026-11-04T17:00:00.000Z');
+    expect(atMidnight.dateKey).toBe('2026-11-05');
+    expect(atMidnight.resetsAt).toBe('2026-11-05T17:00:00.000Z');
   });
 
   it('persists a stored audit for a signed-in user, with its prompt version', async () => {
@@ -98,6 +113,14 @@ describe('CV audit API', () => {
     const auditId = response.body.data.auditId as string;
     expect(auditId).toBeTruthy();
     expect(response.body.data.result.ephemeral).toBe(false);
+    expect(response.body.data.billing).toMatchObject({
+      mode: 'FREE',
+      creditsCharged: 0,
+      freeAuditsUsed: 1,
+      freeAuditsRemaining: 4,
+    });
+    const parsed = cvAuditResponseSchema.safeParse(response.body.data);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
 
     const documents = await ctx.prisma.cvDocument.findMany();
     expect(documents).toHaveLength(1);
@@ -125,9 +148,11 @@ describe('CV audit API', () => {
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({
       userId: session.userId,
+      feature: 'FREE_CV_AUDIT',
+      creditsCharged: 0,
       promptVersion: 'JOB_SEEKER_AUDIT_V1',
     });
-    expect(await ctx.prisma.creditTransaction.count()).toBe(0);
+    expect(await ctx.prisma.creditReservation.count({ where: { state: 'SETTLED' } })).toBe(1);
   });
 
   it('exposes a stored audit through history and detail, and hides it from other users', async () => {
@@ -216,14 +241,128 @@ describe('CV audit API', () => {
     expect(response.body.error.code).toBe('AI_RATE_LIMITED');
   });
 
-  it('throttles anonymous audits per IP', async () => {
-    for (let attempt = 0; attempt < LIMITS.GUEST_AUDIT_RATE_LIMIT; attempt += 1) {
+  it('allows five free audits, then charges the configured additional-audit price', async () => {
+    await topUp();
+
+    for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
+      const allowed = await upload(buildTextPdf(CV_LINES));
+      expect(allowed.status).toBe(200);
+      expect(allowed.body.data.billing.mode).toBe('FREE');
+    }
+
+    const paid = await upload(buildTextPdf(CV_LINES));
+    expect(paid.status).toBe(200);
+    expect(paid.body.data.billing).toMatchObject({
+      mode: 'PAID',
+      creditsCharged: 2,
+      freeAuditsUsed: 5,
+      freeAuditsRemaining: 0,
+      paidAuditCredits: 2,
+    });
+
+    const analyses = await ctx.prisma.cvAnalysis.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(analyses).toHaveLength(6);
+    expect(analyses.slice(0, 5).every((analysis) => analysis.kind === 'FREE_AUDIT')).toBe(true);
+    expect(analyses[5]).toMatchObject({
+      kind: 'DEEP_ANALYSIS',
+      creditsCharged: 2,
+    });
+
+    const usage = await request(app).get('/api/cv/audit/usage').set(bearer(session));
+    expect(usage.body.data).toMatchObject({
+      freeAuditsRemaining: 0,
+      availableCredits: 8,
+      paidAuditCredits: 2,
+    });
+
+    const charge = await ctx.prisma.creditTransaction.findFirst({
+      where: { feature: 'CV_DEEP_ANALYSIS', type: 'USAGE' },
+    });
+    expect(charge).toMatchObject({ amount: -2, balanceAfter: 8 });
+  });
+
+  it('returns INSUFFICIENT_CREDITS instead of starting a sixth audit without credits', async () => {
+    for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
       const allowed = await upload(buildTextPdf(CV_LINES));
       expect(allowed.status).toBe(200);
     }
 
     const blocked = await upload(buildTextPdf(CV_LINES));
-    expect(blocked.status).toBe(429);
-    expect(blocked.body.error.code).toBe('RATE_LIMITED');
+    expect(blocked.status).toBe(402);
+    expect(blocked.body.error.code).toBe('INSUFFICIENT_CREDITS');
+    expect(await ctx.prisma.cvDocument.count()).toBe(5);
+    expect(await ctx.prisma.cvAnalysis.count()).toBe(5);
+    expect(
+      await ctx.prisma.creditReservation.count({ where: { feature: 'CV_DEEP_ANALYSIS' } }),
+    ).toBe(0);
+    expect(await ctx.prisma.aiUsageRecord.count()).toBe(5);
+  });
+
+  it('releases a paid audit hold without charging when the provider fails', async () => {
+    await topUp(5);
+    for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
+      const allowed = await upload(buildTextPdf(CV_LINES));
+      expect(allowed.status).toBe(200);
+    }
+
+    const { getMockProvider } = await import('../src/providers/ai/index.js');
+    getMockProvider().configure({ failNext: 1 });
+    const failed = await upload(buildTextPdf(CV_LINES));
+    expect(failed.status).toBe(502);
+    expect(failed.body.error.code).toBe('AI_PROVIDER_ERROR');
+
+    const { creditService } = await import('../src/services/credit.service.js');
+    const wallet = await creditService.getWallet(session.userId);
+    expect(wallet).toMatchObject({ balance: 5, reserved: 0, available: 5 });
+
+    const paidReservation = await ctx.prisma.creditReservation.findFirstOrThrow({
+      where: { feature: 'CV_DEEP_ANALYSIS' },
+    });
+    expect(paidReservation.state).toBe('RELEASED');
+    expect(await ctx.prisma.cvAnalysis.count()).toBe(5);
+  });
+
+  it('resets the free quota at the start of the next Jakarta day', async () => {
+    const first = await upload(buildTextPdf(CV_LINES));
+    expect(first.status).toBe(200);
+
+    const reservation = await ctx.prisma.creditReservation.findFirstOrThrow({
+      where: { feature: 'FREE_CV_AUDIT' },
+    });
+    await ctx.prisma.creditReservation.update({
+      where: { id: reservation.id },
+      data: { createdAt: new Date(Date.now() - 48 * 60 * 60 * 1_000) },
+    });
+
+    const usage = await request(app).get('/api/cv/audit/usage').set(bearer(session));
+    expect(usage.body.data.freeAuditsUsed).toBe(0);
+    expect(usage.body.data.freeAuditsRemaining).toBe(LIMITS.FREE_CV_AUDITS_PER_DAY);
+
+    const second = await upload(buildTextPdf(CV_LINES));
+    expect(second.status).toBe(200);
+    expect(second.body.data.billing.mode).toBe('FREE');
+  });
+
+  it('does not consume a free slot when the provider fails', async () => {
+    const { getMockProvider } = await import('../src/providers/ai/index.js');
+    getMockProvider().configure({ failNext: 1 });
+
+    const failed = await upload(buildTextPdf(CV_LINES));
+    expect(failed.status).toBe(502);
+    expect(await ctx.prisma.cvAnalysis.count()).toBe(0);
+
+    const usage = await request(app).get('/api/cv/audit/usage').set(bearer(session));
+    expect(usage.body.data.freeAuditsRemaining).toBe(LIMITS.FREE_CV_AUDITS_PER_DAY);
+
+    const reservation = await ctx.prisma.creditReservation.findFirstOrThrow({
+      where: { feature: 'FREE_CV_AUDIT' },
+    });
+    expect(reservation.state).toBe('RELEASED');
+
+    const retry = await upload(buildTextPdf(CV_LINES));
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.billing.mode).toBe('FREE');
   });
 });

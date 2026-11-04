@@ -18,6 +18,10 @@ which was the second CI e2e failure (§8.62).
 Addendum 2026-09-27: the HRD screening results screen gained credit-cost disclosure, confirmation
 dialogs (balance before/after) and a bulk **Verifikasi semua** action with its own preflight and
 all-or-nothing credit validation (§8.63).
+Addendum 2026-11-04: the CV audit now requires an account. Each account receives five free audits
+per Jakarta calendar day, tracked as zero-credit reservations; further audits reserve and settle the
+admin-editable `CV_DEEP_ANALYSIS` price. The former per-IP guest limiter and anonymous in-memory
+audit path are retired (§8.64).
 
 **Workflow rule in force:** work phase by phase and stop at the end of every phase for explicit
 approval. Do not begin the next phase until the owner says `Lanjutkan Phase N`.
@@ -104,9 +108,10 @@ test suite where marked.
   The **purchase** path is deferred to Phase 9 by dependency: `creditService.grantTopUp` requires a
   settled `PaymentTransaction` and no payment provider abstraction exists yet. Top-up packages are
   listed as "segera hadir" rather than pretending to be purchasable.
-- **Phase 6 (Free CV Audit) — COMPLETE**: upload validation, page-aware PDF text extraction, the
-  guest flow (0 credits, processed in memory, nothing persisted), signed-in persistence of the
-  document + analysis, guest IP rate limiting, the `POST /api/cv/audit` route with history/detail
+- **Phase 6 (Free CV Audit) — COMPLETE (guest path superseded 2026-11-04)**: upload validation,
+  page-aware PDF text extraction, originally a guest flow (0 credits, processed in memory, nothing
+  persisted), signed-in persistence of the document + analysis, and the `POST /api/cv/audit` route
+  with history/detail
   reads, and the audit results UI at `/audit` (works signed-out). It also delivered the runtime
   prompt-orchestration slice required by §11.1 for the audit prompt: `prompts/global/*`,
   `prompts/promptBuilder.ts`, `prompts/jobSeeker/auditPrompt.ts`, provider-independent
@@ -385,7 +390,7 @@ dinilai` for an unscored candidate, report export and history). `docs/API.md` an
   inconclusive-page case, and `tests/screening-evidence.test.ts` gained a case proving an invalid
   provider response stores no envelope and records no provider cost. `tests/shared-weights.test.ts`
   (7, executed) covers the two exported `@aseb/shared` weight helpers, which nothing calls today
-  (§8.44). E2E specs for the guest audit and the recruiter batch flow were written
+  (§8.44). E2E specs for audits and the recruiter batch flow were written
   (`apps/web/e2e/{audit,screening}.spec.ts` + a PDF fixture helper) but cannot run without
   Chromium. Coverage for the offline subset was 60.1% statements; **the repo-wide figure is now
   measured** on the owner's machine - 83.02% statements / 84.04% lines over 58 files and 490 tests
@@ -601,7 +606,7 @@ Categories (full placeholders in `.env.example`): core (`NODE_ENV`, `PORT`, `API
 `FRONTEND_URL`, `CORS_EXTRA_ORIGINS`, `LOG_LEVEL`), database (`DATABASE_URL`, `DIRECT_URL`), Supabase
 (`SUPABASE_*`), auth dev fallback (`AUTH_DEV_MODE`, `AUTH_DEV_JWT_SECRET`, `ADMIN_EMAILS`), AI
 (`AI_PROVIDER`, `DEEPSEEK_*`, `AI_WORKER_CONCURRENCY`, `AI_MARKUP_MULTIPLIER`), queue (`REDIS_URL`),
-uploads/limits (`MAX_PDF_BYTES`, `MAX_SCREENING_CVS`, `GUEST_AUDIT_RATE_LIMIT`, …), payments
+uploads/limits (`MAX_PDF_BYTES`, `MAX_SCREENING_CVS`, …), payments
 (`PAYMENT_PROVIDER`, `MIDTRANS_*`, `PAYMENT_MOCK_WEBHOOK_SECRET`), business (`MIN_TOPUP_IDR`,
 `CREDIT_IDR_VALUE`), integrations (`GITHUB_*`, `PORTFOLIO_VERIFICATION_ENABLED`), storage
 (`SUPABASE_STORAGE_*`), rendering (`PDF_RENDERER`, `PUPPETEER_*`).
@@ -826,7 +831,7 @@ Phase 20 additions (executed where the sandbox allowed it; see the note below):
 - `apps/api/tests/screening-evidence.test.ts` (14, **executed**) — gained a case proving an invalid
   provider response propagates, stores no envelope and writes no provider-cost row.
 - `apps/web/e2e/{audit,screening}.spec.ts` + `e2e/helpers/pdf.ts` (**written, not executed**) —
-  the guest audit flow and the recruiter flow (dev sign-up -> create job -> upload a CV -> ranked
+  the audit and recruiter flows (dev sign-up -> create job -> upload a CV -> ranked
   result with evidence -> CSV download), plus the case where an unmet hard requirement keeps the
   candidate visible.
 
@@ -1048,17 +1053,18 @@ Phase 7 additions (executed where the sandbox allowed it; see the note below):
 
 Phase 6 additions (all re-verified after the final edit, not just at the time of writing):
 
-- `tests/cv-audit.test.ts` (11) — guest audit is 0 credits, versioned and leaves no CV rows;
-  signed-in audit stores document + analysis + usage with `JOB_SEEKER_AUDIT_V1`; history/detail
-  reads and cross-user isolation; non-PDF, misleading extension, empty buffer, oversized (413),
-  scanned PDF (422), provider failure (502) and rate-limit (503) mapping; guest IP throttle (429);
-  the guest response validates against `cvAuditResponseSchema`.
+- `tests/cv-audit.test.ts` — authentication is mandatory; five free audits per Jakarta day are
+  stored with `JOB_SEEKER_AUDIT_V1`, the sixth uses the configured paid feature and ledger, and an
+  unaffordable sixth is `402`; history/detail reads and cross-user isolation; non-PDF, misleading
+  extension, empty buffer, oversized (413), scanned PDF (422), provider failure (502) and
+  provider-rate-limit (503) mapping; failed audits release their quota; responses validate against
+  `cvAuditResponseSchema`.
 - `tests/prompt-builder.test.ts` (7) — layer order (policy → feature → context → task → untrusted
   last), document content never reaching the system role, injection text staying inside the
   delimiter, per-document bounds, version ids, label sanitisation and `composeSystemPrompt`.
-- `apps/web/src/pages/AuditPage.test.tsx` (5) — guest form with no account, PDF upload and
-  structured result rendering, client-side non-PDF rejection, API error surfacing, stored-result
-  copy for a signed-in user.
+- `apps/web/src/pages/AuditPage.test.tsx` — authenticated audit form, daily quota and paid overage
+  copy, PDF upload and structured result rendering, client-side non-PDF rejection, API error
+  surfacing, and the top-up prompt when credits are insufficient.
 
 Phase 5 additions:
 
@@ -1522,6 +1528,15 @@ dev:worker` plus one uploaded batch is enough.
     `tests/portfolio-verification.test.ts` (19), `tests/screening-verification-api.test.ts` (7,
     PGlite) and the web suites (`ScreeningJobPage.test.tsx` 11, `ConfirmDialog.test.tsx` 3). No
     schema change was needed.
+64. **CV audit is now account-required with a daily free allowance** (2026-11-04). The old route
+    was public and applied `GUEST_AUDIT_RATE_LIMIT` per IP (3 requests/hour), which also throttled
+    signed-in users and made the "free audit" limit unrelated to an account. The route and page now
+    require a session. Each account gets five free audits per Jakarta calendar day, represented by
+    zero-credit `FREE_CV_AUDIT` reservations; an in-flight or settled reservation consumes the
+    allowance, while a failed one is released. After five successes, the next audit reserves and
+    settles `CV_DEEP_ANALYSIS` (2 credits by default, admin-overridable) and is stored as
+    `CvAnalysis.kind = DEEP_ANALYSIS`. `GET /api/cv/audit/usage` exposes remaining quota, reset time,
+    effective price and available credits. No schema change was needed.
 
 ---
 

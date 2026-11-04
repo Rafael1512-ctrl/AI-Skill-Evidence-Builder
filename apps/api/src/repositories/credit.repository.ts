@@ -1,4 +1,9 @@
-import type { CreditTransaction, CreditTransactionType, Prisma, ReservationState } from '../generated/prisma/client.js';
+import type {
+  CreditTransaction,
+  CreditTransactionType,
+  Prisma,
+  ReservationState,
+} from '../generated/prisma/client.js';
 import { Prisma as PrismaNamespace } from '../generated/prisma/client.js';
 import { getPrisma } from '../db/prisma.js';
 import { AppError } from '../utils/errors.js';
@@ -84,7 +89,15 @@ export class CreditRepository {
 
     const created = await client.creditWallet.create({
       data: { userId },
-      select: { id: true, userId: true, balance: true, reserved: true, lifetimeCreditsIn: true, lifetimeCreditsSpent: true, updatedAt: true },
+      select: {
+        id: true,
+        userId: true,
+        balance: true,
+        reserved: true,
+        lifetimeCreditsIn: true,
+        lifetimeCreditsSpent: true,
+        updatedAt: true,
+      },
     });
     return created;
   }
@@ -107,7 +120,10 @@ export class CreditRepository {
    */
   async applyDeltaWithLedger(
     input: ApplyDeltaInput,
-    ledger: Omit<LedgerEntryInput, 'walletId' | 'userId' | 'balanceBefore' | 'balanceAfter' | 'amount'> & {
+    ledger: Omit<
+      LedgerEntryInput,
+      'walletId' | 'userId' | 'balanceBefore' | 'balanceAfter' | 'amount'
+    > & {
       amount: number;
     },
     tx?: Prisma.TransactionClient,
@@ -121,16 +137,15 @@ export class CreditRepository {
         if (existing) {
           const current = await this.getWallet(existing.userId, client);
           return {
-            wallet:
-              current ?? {
-                id: existing.walletId,
-                userId: existing.userId,
-                balance: existing.balanceAfter,
-                reserved: 0,
-                lifetimeCreditsIn: 0,
-                lifetimeCreditsSpent: 0,
-                updatedAt: existing.createdAt,
-              },
+            wallet: current ?? {
+              id: existing.walletId,
+              userId: existing.userId,
+              balance: existing.balanceAfter,
+              reserved: 0,
+              lifetimeCreditsIn: 0,
+              lifetimeCreditsSpent: 0,
+              updatedAt: existing.createdAt,
+            },
             transaction: existing,
           };
         }
@@ -213,18 +228,22 @@ export class CreditRepository {
         if (existing) return existing;
       }
 
-      await client.$queryRaw<WalletRow[]>(PrismaNamespace.sql`
+      await client
+        .$queryRaw<WalletRow[]>(
+          PrismaNamespace.sql`
         UPDATE credit_wallets
            SET reserved = reserved + ${input.credits}, updated_at = now()
          WHERE id = ${input.walletId}
            AND reserved + ${input.credits} >= 0
            AND balance >= reserved + ${input.credits}
         RETURNING ${walletSelect}
-      `).then((rows) => {
-        if (rows.length === 0) {
-          throw AppError.insufficientCredits(input.credits, 0);
-        }
-      });
+      `,
+        )
+        .then((rows) => {
+          if (rows.length === 0) {
+            throw AppError.insufficientCredits(input.credits, 0);
+          }
+        });
 
       return client.creditReservation.create({
         data: {
@@ -265,7 +284,15 @@ export class CreditRepository {
   ): Promise<{ charged: number; released: number; alreadySettled: boolean }> {
     const run = async (client: Prisma.TransactionClient) => {
       const reservations = await client.$queryRaw<
-        Array<{ id: string; walletId: string; userId: string; feature: string; reservedCredits: number; state: ReservationState; settledCredits: number | null }>
+        Array<{
+          id: string;
+          walletId: string;
+          userId: string;
+          feature: string;
+          reservedCredits: number;
+          state: ReservationState;
+          settledCredits: number | null;
+        }>
       >(PrismaNamespace.sql`
         SELECT id,
                wallet_id as "walletId",
@@ -320,7 +347,9 @@ export class CreditRepository {
 
       if (wallet.balance < 0) {
         // Defensive: the guard above makes this impossible, but never persist a negative wallet.
-        throw AppError.internal(new Error('Credit invariant violated: negative balance after settlement'));
+        throw AppError.internal(
+          new Error('Credit invariant violated: negative balance after settlement'),
+        );
       }
 
       return { charged: charge, released: release, alreadySettled: false };
@@ -414,5 +443,28 @@ export class CreditRepository {
 
   async countActiveReservations(): Promise<number> {
     return getPrisma().creditReservation.count({ where: { state: 'ACTIVE' } });
+  }
+
+  /**
+   * Counts reservations that represent actual quota use for one feature.
+   *
+   * `ACTIVE` covers an audit that is currently in flight; `SETTLED` covers a completed
+   * audit. A failed operation is `RELEASED` and therefore does not consume the quota.
+   */
+  async countReservationsInWindow(input: {
+    userId: string;
+    feature: string;
+    from: Date;
+    to: Date;
+    states?: ReservationState[];
+  }): Promise<number> {
+    return getPrisma().creditReservation.count({
+      where: {
+        userId: input.userId,
+        feature: input.feature,
+        state: { in: input.states ?? ['ACTIVE', 'SETTLED'] },
+        createdAt: { gte: input.from, lt: input.to },
+      },
+    });
   }
 }

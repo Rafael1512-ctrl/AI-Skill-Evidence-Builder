@@ -30,7 +30,7 @@ export function HomePage() {
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-5">
           <dt className="font-medium">Pencari Kerja</dt>
           <dd className="mt-1 text-sm text-[var(--color-content-muted)]">
-            Audit CV gratis, lalu sempurnakan tanpa menambah fakta yang tidak ada.
+            Lima audit CV gratis setiap hari, lalu sempurnakan tanpa menambah fakta yang tidak ada.
           </dd>
         </div>
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-5">
@@ -46,7 +46,7 @@ export function HomePage() {
           to="/audit"
           className="rounded-lg bg-[var(--color-brand)] px-4 py-2 font-medium text-[var(--color-brand-contrast)]"
         >
-          Audit CV Gratis
+          Audit CV · 5 gratis/hari
         </Link>
         <Link
           to="/enhance"

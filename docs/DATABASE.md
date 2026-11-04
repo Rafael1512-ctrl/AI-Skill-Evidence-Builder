@@ -94,14 +94,14 @@ Payments:
 | Model           | Table             | Purpose                                                                                                          |
 | --------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `CvDocument`    | `cv_documents`    | Uploaded or generated CV. Stores metadata plus extracted plain text when the workflow is persistent.             |
-| `CvAnalysis`    | `cv_analyses`     | Validated free-audit / deep-analysis result (`result` JSON), with score, credits charged and prompt version.     |
+| `CvAnalysis`    | `cv_analyses`     | Validated free or paid audit result (`result` JSON), with score, credits charged and prompt version.             |
 | `CvEnhancement` | `cv_enhancements` | Paid enhancement: options, generated document JSON, template, status, credits, reservation link, prompt version. |
 
 Key details:
 
-- `cv_documents.user_id` is nullable because the anonymous free audit must not be
-  attributed to an account. Anonymous audits persist **no row at all**
-  (`is_ephemeral` exists for explicitly requested ephemeral records).
+- CV audits require an authenticated account, so current audit rows always have
+  `user_id`. The nullable column remains for historical data and future explicitly ephemeral
+  records; `is_ephemeral` is likewise retained for compatibility.
 - `deleted_at` plus clearing `text_content` is the deletion path used by
   `CvRepository.deleteDocument`.
 - `cv_enhancements.source_document_id` links the uploaded CV; `result_document_id` links the
@@ -484,6 +484,9 @@ same interface but is never auto-activated.
 - Defaults: `FREE_CV_AUDIT` 0, `CV_DEEP_ANALYSIS` 2, `CV_ENHANCEMENT` 5,
   `CV_REGENERATE` 3, `CV_PDF_EXPORT` 1, `EVIDENCE_VERIFICATION` 2,
   `HRD_SCREEN_PER_CV` 1.
+- `FREE_CV_AUDIT` records the five account-scoped free audits per Jakarta day as
+  zero-credit reservations. Once that allowance is exhausted, `CV_DEEP_ANALYSIS`
+  is the effective price of each additional audit; a failed audit releases its hold.
 - `PricingService` caches overrides for 30 seconds (invalidated on write) and merges them
   over the defaults. No component or controller hardcodes a credit cost.
 
@@ -544,7 +547,7 @@ Privacy rules that shape the schema (see `docs/SECURITY.md`):
 
 | Data                        | Retention                                                                                                        |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Anonymous free-audit upload | No `cv_documents` row; extracted text is used in memory and discarded.                                           |
+| Audit upload                | Requires an account; the document and extracted text are stored until the user deletes the document.             |
 | Authenticated CV text       | Stored in `cv_documents.text_content` with `user_id`; removable via soft delete that also clears `text_content`. |
 | Screening candidate CV text | Stored in `screening_candidates.cv_text` for the recruiter's batch; cascades when the job is deleted.            |
 | Generated reports           | Metadata always; the file itself may live in Supabase Storage (`storage_path`) or be generated on demand.        |

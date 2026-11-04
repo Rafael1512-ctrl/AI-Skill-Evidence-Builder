@@ -80,19 +80,19 @@ Non-negotiables for this option:
 
 `.env.example` documents every key. The ones that decide whether a deployment is safe:
 
-| Variable                          | Development        | Production                                       |
-| --------------------------------- | ------------------ | ------------------------------------------------ |
-| `NODE_ENV`                        | `development`      | `production` (validation becomes strict)         |
-| `AUTH_DEV_MODE`                   | `true`             | **`false`** (the API refuses `true` here)        |
-| `DATABASE_URL` / `DIRECT_URL`     | local or Supabase  | pooler with `no-verify` / session pooler         |
-| `REDIS_URL`                       | unset (in-process) | set (shared limits + out-of-process worker)      |
-| `AI_PROVIDER`                     | `mock`             | `deepseek` + `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL` |
-| `PAYMENT_PROVIDER`                | `mock`             | `midtrans` + `MIDTRANS_SERVER_KEY`               |
-| `OUTBOUND_HTTP_PROVIDER`          | `mock`             | `guarded` to enable link verification            |
-| `PDF_RENDERER`                    | `mock`             | `puppeteer` (needs Chromium in the image)        |
-| `ADMIN_EMAILS`                    | your address       | your address (first admin bootstrap)             |
-| `CORS_EXTRA_ORIGINS`              | empty              | the real web origin(s) only                      |
-| `GUEST_AUDIT_RATE_LIMIT`, `MAX_*` | defaults           | review against expected traffic                  |
+| Variable                      | Development        | Production                                       |
+| ----------------------------- | ------------------ | ------------------------------------------------ |
+| `NODE_ENV`                    | `development`      | `production` (validation becomes strict)         |
+| `AUTH_DEV_MODE`               | `true`             | **`false`** (the API refuses `true` here)        |
+| `DATABASE_URL` / `DIRECT_URL` | local or Supabase  | pooler with `no-verify` / session pooler         |
+| `REDIS_URL`                   | unset (in-process) | set (shared limits + out-of-process worker)      |
+| `AI_PROVIDER`                 | `mock`             | `deepseek` + `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL` |
+| `PAYMENT_PROVIDER`            | `mock`             | `midtrans` + `MIDTRANS_SERVER_KEY`               |
+| `OUTBOUND_HTTP_PROVIDER`      | `mock`             | `guarded` to enable link verification            |
+| `PDF_RENDERER`                | `mock`             | `puppeteer` (needs Chromium in the image)        |
+| `ADMIN_EMAILS`                | your address       | your address (first admin bootstrap)             |
+| `CORS_EXTRA_ORIGINS`          | empty              | the real web origin(s) only                      |
+| `MAX_*`                       | defaults           | review against expected traffic                  |
 
 Secrets come from the platform's secret store. `.env` and `.env.*` are git-ignored, `.env.example`
 holds placeholders only, and `docs/SECURITY.md` section 2 lists what must never be logged.
@@ -103,8 +103,9 @@ developer `.env` never reaches a build.
 ## 6. Smoke test after the first deploy
 
 1. `GET /api/health` -> `status: ok`, `database: connected`, and the providers you configured.
-2. Guest flow: `/audit`, upload a text PDF, get a structured result (0 credits, no account).
-3. Account flow: sign in, `/profile` loads, Google linking works if it is configured.
+2. Audit flow: sign in, open `/audit`, confirm the five-audit daily allowance, upload a text PDF,
+   and get a stored structured result.
+3. Account flow: `/profile` loads, and Google linking works if it is configured.
 4. Top-up: one **sandbox** payment, credits appear exactly once in the ledger, then replay the same
    notification and confirm it is a duplicate no-op (`/api/admin/webhook-events`).
 5. Screening: create a job, upload one CV, wait for `COMPLETED`, open the results, export a CSV.

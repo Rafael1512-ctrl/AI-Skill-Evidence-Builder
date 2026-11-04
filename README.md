@@ -16,7 +16,8 @@ requirement stay visible instead of silently disappearing.
 
 **Job Seeker**
 
-- Free CV audit for guests: PDF upload, no account, 0 credits, structured ATS-oriented feedback.
+- Account-required CV audit: five free audits per Jakarta calendar day, then the published
+  `CV_DEEP_ANALYSIS` credit price, with structured ATS-oriented feedback.
 - Paid CV enhancement (5 credits) with an explicit anti-fabrication contract, target role tailoring,
   optional GitHub / LinkedIn / portfolio links, and a Before vs After preview.
 - Three export templates: ATS Minimal, Professional, Modern.
@@ -292,8 +293,8 @@ does `npm run dev:api` start by hand, and is only one process listening on 4000/
 
 ## Security and privacy
 
-- CVs are sensitive personal data. Anonymous audit uploads are processed in memory and are not
-  permanently retained by default.
+- CVs are sensitive personal data. Audit uploads require an account and are stored so the user can
+  open them from history; users can delete a stored CV document.
 - CV text and fetched web pages are treated as untrusted data, never as instructions.
 - Portfolio verification is SSRF-guarded: no localhost, no private ranges, no metadata endpoints,
   no redirect surprises, hard timeouts and response-size caps.

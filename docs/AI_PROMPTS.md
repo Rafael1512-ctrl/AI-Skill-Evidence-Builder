@@ -220,14 +220,14 @@ still computed deterministically after evidence extraction; the model never rank
 
 Registry in `promptBuilder.ts`:
 
-| Version id                      | Prompt                               | Feature key             | Persisted on                                                    |
-| ------------------------------- | ------------------------------------ | ----------------------- | --------------------------------------------------------------- |
-| `JOB_SEEKER_AUDIT_V1`           | `jobSeeker/auditPrompt.ts`           | `FREE_CV_AUDIT`         | `AiUsageRecord.promptVersion`, `CvAnalysis.promptVersion`       |
-| `JOB_SEEKER_ENHANCE_V1`         | `jobSeeker/enhancePrompt.ts`         | `CV_ENHANCEMENT`        | `AiUsageRecord.promptVersion`, `CvEnhancement.promptVersion`    |
-| `JOB_SEEKER_EVIDENCE_V1`        | `jobSeeker/evidencePrompt.ts`        | `CV_DEEP_ANALYSIS`      | `AiUsageRecord.promptVersion`                                   |
+| Version id                      | Prompt                               | Feature key             | Persisted on                                                                                                                       |
+| ------------------------------- | ------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `JOB_SEEKER_AUDIT_V1`           | `jobSeeker/auditPrompt.ts`           | `FREE_CV_AUDIT`         | `AiUsageRecord.promptVersion`, `CvAnalysis.promptVersion`                                                                          |
+| `JOB_SEEKER_ENHANCE_V1`         | `jobSeeker/enhancePrompt.ts`         | `CV_ENHANCEMENT`        | `AiUsageRecord.promptVersion`, `CvEnhancement.promptVersion`                                                                       |
+| `JOB_SEEKER_EVIDENCE_V1`        | `jobSeeker/evidencePrompt.ts`        | `CV_DEEP_ANALYSIS`      | `AiUsageRecord.promptVersion`                                                                                                      |
 | `HRD_EVIDENCE_EXTRACTION_V1`    | `hrd/evidenceExtractionPrompt.ts`    | `HRD_SCREEN_PER_CV`     | `AiUsageRecord.promptVersion` + the candidate's `analysis_json` envelope (prompt/preference/scoring/requirement versions together) |
-| `HRD_SCREENING_V1`              | `hrd/screeningPrompt.ts`             | `HRD_SCREEN_PER_CV`     | `ScreeningJob.promptVersion` (with preference/scoring versions) |
-| `HRD_PORTFOLIO_VERIFICATION_V1` | `hrd/portfolioVerificationPrompt.ts` | `EVIDENCE_VERIFICATION` | `AiUsageRecord.promptVersion`                                   |
+| `HRD_SCREENING_V1`              | `hrd/screeningPrompt.ts`             | `HRD_SCREEN_PER_CV`     | `ScreeningJob.promptVersion` (with preference/scoring versions)                                                                    |
+| `HRD_PORTFOLIO_VERIFICATION_V1` | `hrd/portfolioVerificationPrompt.ts` | `EVIDENCE_VERIFICATION` | `AiUsageRecord.promptVersion`                                                                                                      |
 
 Rules:
 
@@ -289,7 +289,7 @@ feature service
   that cannot be found is downgraded, not trusted (`UNCERTAIN`/`NOT_FOUND`), and never upgraded.
 - Missing/extra keys are handled by schema defaults and strict object shapes; a model that omits a
   required criterion produces a validation error the service can retry or fail cleanly.
-- Deterministic scoring (Phase 14) consumes only the *grounded* result:
+- Deterministic scoring (Phase 14) consumes only the _grounded_ result:
   `services/scoring/engine.ts` reads the stored envelope, applies its fixed outcome table
   (`FOUND` 100 / `UNCERTAIN` 50 / `NOT_FOUND` 0, with a weak or quote-less `FOUND` demoted to
   `UNCERTAIN`) and computes the candidate score from weights alone. No provider call participates
@@ -316,14 +316,14 @@ feature service
 This requirement is folded into the phases that already own the relevant code. No phase starts
 because of this document.
 
-| Phase                     | Work                                                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 6 Free CV Audit           | **DONE** — extracted `global/*`, added `promptBuilder.ts`, moved the audit prompt to `jobSeeker/auditPrompt.ts`, provider consumes `PromptPayload`, `JOB_SEEKER_AUDIT_V1` persisted. |
-| 7 Paid CV Enhancer        | **DONE** — `jobSeeker/enhancePrompt.ts`, structured job-seeker context block with consent gating (`useProfileContext`), `JOB_SEEKER_ENHANCE_V1`, provider consumes `PromptPayload`, `CvEnhancement.promptVersion` persisted. |
-| 10 Recruiter Requirements | **DONE** — `hrd/screeningPrompt.ts` composes `HRD_SCREENING_V1` (policy + feature prompt, then the frozen preference/scoring context, the requirements as labelled JSON, and the untrusted job description / CV / external evidence last); `ScreeningJob.promptVersion` persists it next to `preferenceVersion`. |
+| Phase                     | Work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6 Free CV Audit           | **DONE** — extracted `global/*`, added `promptBuilder.ts`, moved the audit prompt to `jobSeeker/auditPrompt.ts`, provider consumes `PromptPayload`, `JOB_SEEKER_AUDIT_V1` persisted.                                                                                                                                                                                                                                                                                                                     |
+| 7 Paid CV Enhancer        | **DONE** — `jobSeeker/enhancePrompt.ts`, structured job-seeker context block with consent gating (`useProfileContext`), `JOB_SEEKER_ENHANCE_V1`, provider consumes `PromptPayload`, `CvEnhancement.promptVersion` persisted.                                                                                                                                                                                                                                                                             |
+| 10 Recruiter Requirements | **DONE** — `hrd/screeningPrompt.ts` composes `HRD_SCREENING_V1` (policy + feature prompt, then the frozen preference/scoring context, the requirements as labelled JSON, and the untrusted job description / CV / external evidence last); `ScreeningJob.promptVersion` persists it next to `preferenceVersion`.                                                                                                                                                                                         |
 | 13 Evidence Extraction    | **DONE** — `hrd/evidenceExtractionPrompt.ts` composes `HRD_EVIDENCE_EXTRACTION_V1` (policy + feature prompt, then the frozen preference/scoring context, the requirements as labelled JSON, and the job description / CV / external evidence delimited last); `extractScreeningEvidence` now only transports a `PromptPayload`; `utils/evidence.ts` grounds quotes against the stored CV text before anything is persisted; the mock provider reads the criteria and CV back out of the composed layers. |
-| 16 Evidence Verification  | **DONE** — `hrd/portfolioVerificationPrompt.ts` composes `HRD_PORTFOLIO_VERIFICATION_V1` (policy + feature prompt, the URL as labelled data, the fetched page delimited last) and `analyzePortfolio` only transports a `PromptPayload`. `promptFromParts` is deleted, so no prompt is built inside a provider any more. |
-| 20 Testing                | Remaining prompt-layer tests: version persistence for the enhancer/screening, injection resistance and Zod failure paths beyond the audit.                          |
+| 16 Evidence Verification  | **DONE** — `hrd/portfolioVerificationPrompt.ts` composes `HRD_PORTFOLIO_VERIFICATION_V1` (policy + feature prompt, the URL as labelled data, the fetched page delimited last) and `analyzePortfolio` only transports a `PromptPayload`. `promptFromParts` is deleted, so no prompt is built inside a provider any more.                                                                                                                                                                                  |
+| 20 Testing                | Remaining prompt-layer tests: version persistence for the enhancer/screening, injection resistance and Zod failure paths beyond the audit.                                                                                                                                                                                                                                                                                                                                                               |
 
 The Phase 6 and Phase 7 `promptVersion` columns were folded into the single initial migration
 rather than a new additive one, because no database is deployed yet (see §8). The additive-migration
@@ -334,26 +334,27 @@ new migration folder documented in `docs/DATABASE.md`.
 
 ## 13. Current implementation status (audit of 2026-09-26, after Phase 6)
 
-| Element                                                                  | State                                                                                                                             |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `composeSystemPrompt` + policy blocks                                    | EXISTS (`prompts/global/*`, all in Indonesian)                                                                                    |
-| Anti-fabrication, evidence, untrusted-data, language, JSON-only policies | EXISTS, split into `global/globalPolicy.ts`, `antiFabricationPolicy.ts`, `promptInjectionPolicy.ts`, `evidencePolicy.ts`          |
-| Feature prompts for audit / enhance / screening                          | EXISTS — `jobSeeker/auditPrompt.ts`, `jobSeeker/enhancePrompt.ts`, `hrd/evidenceExtractionPrompt.ts` (the per-candidate call) and `hrd/screeningPrompt.ts` (the job-level context id, sharing one composition) |
-| Portfolio summary prompt                                                 | EXISTS — `hrd/portfolioVerificationPrompt.ts` (`HRD_PORTFOLIO_VERIFICATION_V1`)                                                   |
-| `promptBuilder.ts` layer composition                                     | EXISTS — layers, labelled JSON blocks, `wrapUntrusted` last                                                                       |
-| Prompt version ids                                                       | EXISTS (`prompts/types.ts`, `PROMPT_VERSIONS`)                                                                                    |
-| Prompt version persistence                                               | `AiUsageRecord.promptVersion`, `CvAnalysis.promptVersion`, `CvEnhancement.promptVersion` and `ScreeningJob.promptVersion` (Phase 10, folded into the initial migration)                            |
-| Provider-independent prompt composition                                  | EXISTS — every provider method (audit, enhancement, screening evidence, portfolio) consumes a `PromptPayload` and the mock reads the composed layers; `promptFromParts` is gone |
-| Structured job-seeker context block                                      | EXISTS — `jobSeeker/enhancePrompt.ts` emits a labelled JSON block with a consent gate; saved profile fields are omitted unless `useProfileContext` is true |
-| Structured recruiter context block                                       | EXISTS — `hrd/screeningPrompt.ts` emits a labelled `recruiter-preference-version` JSON block (empty lists dropped, `portfolioImportance` always kept) over the frozen `RecruiterPreference.version` |
-| Scoring/preference/requirement versioning on screening                   | EXISTS (`scoringConfigurationVersion`, `preferenceVersion`, `requirementVersion`)                                                 |
-| Untrusted wrapping (`wrapUntrusted`, `sanitizeText`, truncation)         | EXISTS and used                                                                                                                   |
-| Zod validation of model output                                           | EXISTS in providers                                                                                                               |
+| Element                                                                  | State                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `composeSystemPrompt` + policy blocks                                    | EXISTS (`prompts/global/*`, all in Indonesian)                                                                                                                                                                    |
+| Anti-fabrication, evidence, untrusted-data, language, JSON-only policies | EXISTS, split into `global/globalPolicy.ts`, `antiFabricationPolicy.ts`, `promptInjectionPolicy.ts`, `evidencePolicy.ts`                                                                                          |
+| Feature prompts for audit / enhance / screening                          | EXISTS — `jobSeeker/auditPrompt.ts`, `jobSeeker/enhancePrompt.ts`, `hrd/evidenceExtractionPrompt.ts` (the per-candidate call) and `hrd/screeningPrompt.ts` (the job-level context id, sharing one composition)    |
+| Portfolio summary prompt                                                 | EXISTS — `hrd/portfolioVerificationPrompt.ts` (`HRD_PORTFOLIO_VERIFICATION_V1`)                                                                                                                                   |
+| `promptBuilder.ts` layer composition                                     | EXISTS — layers, labelled JSON blocks, `wrapUntrusted` last                                                                                                                                                       |
+| Prompt version ids                                                       | EXISTS (`prompts/types.ts`, `PROMPT_VERSIONS`)                                                                                                                                                                    |
+| Prompt version persistence                                               | `AiUsageRecord.promptVersion`, `CvAnalysis.promptVersion`, `CvEnhancement.promptVersion` and `ScreeningJob.promptVersion` (Phase 10, folded into the initial migration)                                           |
+| Provider-independent prompt composition                                  | EXISTS — every provider method (audit, enhancement, screening evidence, portfolio) consumes a `PromptPayload` and the mock reads the composed layers; `promptFromParts` is gone                                   |
+| Structured job-seeker context block                                      | EXISTS — `jobSeeker/enhancePrompt.ts` emits a labelled JSON block with a consent gate; saved profile fields are omitted unless `useProfileContext` is true                                                        |
+| Structured recruiter context block                                       | EXISTS — `hrd/screeningPrompt.ts` emits a labelled `recruiter-preference-version` JSON block (empty lists dropped, `portfolioImportance` always kept) over the frozen `RecruiterPreference.version`               |
+| Scoring/preference/requirement versioning on screening                   | EXISTS (`scoringConfigurationVersion`, `preferenceVersion`, `requirementVersion`)                                                                                                                                 |
+| Untrusted wrapping (`wrapUntrusted`, `sanitizeText`, truncation)         | EXISTS and used                                                                                                                                                                                                   |
+| Zod validation of model output                                           | EXISTS in providers                                                                                                                                                                                               |
 | Quote grounding (`quoteExistsInSource`)                                  | EXISTS and WIRED — `utils/evidence.ts` drops unverifiable quotes and can only downgrade a `FOUND` verdict, applied at extraction time (Phase 13). Page numbers are not persisted yet (`PROJECT_CONTEXT.md` §8.24) |
 
 Phase 6 tests: `apps/api/tests/prompt-builder.test.ts` pins layer order, delimiter integrity,
-injection containment and versioning; `apps/api/tests/cv-audit.test.ts` pins the guest/signed-in
-persistence split and proves the prompt version lands on `AiUsageRecord` and `CvAnalysis`.
+injection containment and versioning; `apps/api/tests/cv-audit.test.ts` pins authenticated
+persistence, the daily free quota, the paid overage path and the prompt version on
+`AiUsageRecord` and `CvAnalysis`.
 
 Phase 7 tests: `apps/api/tests/enhance-prompt.test.ts` pins the consent gate, the labelled-JSON
 context and untrusted-documents-last ordering; `apps/api/tests/cv-enhancement.test.ts` pins the
@@ -378,7 +379,7 @@ built inside a provider, and the §11.1 requirement is satisfied end to end.
 
 ## 14. Open decisions for the owner
 
-1. **Two HRD versions or one?** *Closed as implemented in Phases 10 + 13*: `HRD_SCREENING_V1`
+1. **Two HRD versions or one?** _Closed as implemented in Phases 10 + 13_: `HRD_SCREENING_V1`
    records the screening composition (job + requirements + frozen preferences + scoring config)
    and is persisted on `ScreeningJob.promptVersion`; each model call records
    `HRD_EVIDENCE_EXTRACTION_V1` on `AiUsageRecord.promptVersion` and in the candidate's

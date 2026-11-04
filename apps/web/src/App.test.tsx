@@ -25,4 +25,11 @@ describe('App shell', () => {
 
     expect(await screen.findByRole('heading', { name: /^masuk$/i })).toBeInTheDocument();
   });
+
+  it('sends a signed-out visitor from /audit to the sign-in page', async () => {
+    window.history.pushState({}, '', '/audit');
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /^masuk$/i })).toBeInTheDocument();
+  });
 });

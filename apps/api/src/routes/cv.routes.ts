@@ -12,16 +12,15 @@ import {
   enhanceCv,
   exportEnhancement,
   getAnalysis,
+  getAuditUsage,
   getEnhancement,
   getHistory,
   listTemplates,
   testRoute,
 } from '../controllers/cv.controller.js';
-import { optionalAuth, requireAuth } from '../middleware/auth.js';
-import { clientIp, rateLimit } from '../middleware/rate-limit.js';
+import { requireAuth } from '../middleware/auth.js';
 import { uploadSinglePdf } from '../middleware/upload.js';
 import { validate } from '../middleware/validate.js';
-import { env } from '../config/env.js';
 
 export const cvRouter = Router();
 
@@ -31,32 +30,16 @@ cvRouter.get('/test', testRoute);
 cvRouter.get('/templates', listTemplates);
 
 /**
- * Free CV audit.
+ * CV audit.
  *
- * Guests are allowed (0 credits) but limited per IP; authenticated users are limited
- * more generously because their usage is attributable.
+ * Authentication is mandatory. The service gives each account five free audits per
+ * Jakarta calendar day, then reserves and settles the `CV_DEEP_ANALYSIS` price.
  */
-cvRouter.post(
-  '/audit',
-  optionalAuth(),
-  rateLimit({
-    scope: 'cv-audit',
-    windowMs: env.GUEST_AUDIT_RATE_WINDOW_MINUTES * 60_000,
-    max: env.GUEST_AUDIT_RATE_LIMIT,
-    keyGenerator: (req) => req.auth?.userId ?? clientIp(req),
-    message:
-      'Batas audit CV gratis tercapai untuk saat ini. Silakan daftar untuk melanjutkan atau coba lagi nanti.',
-  }),
-  uploadSinglePdf,
-  auditCv,
-);
+cvRouter.get('/audit/usage', requireAuth(), getAuditUsage);
 
-cvRouter.get(
-  '/history',
-  requireAuth(),
-  validate({ query: paginationQuerySchema }),
-  getHistory,
-);
+cvRouter.post('/audit', requireAuth(), uploadSinglePdf, auditCv);
+
+cvRouter.get('/history', requireAuth(), validate({ query: paginationQuerySchema }), getHistory);
 
 /**
  * Paid CV enhancement.

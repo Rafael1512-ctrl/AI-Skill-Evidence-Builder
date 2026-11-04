@@ -149,7 +149,7 @@ function PricingSection() {
         Harga fitur
       </h2>
       <p className="mt-1 text-sm text-[var(--color-content-muted)]">
-        Harga dalam kredit. Audit CV pertama selalu gratis.
+        Harga dalam kredit. Lima audit CV pertama setiap hari gratis setelah Anda masuk.
       </p>
 
       {pricing.isPending ? (

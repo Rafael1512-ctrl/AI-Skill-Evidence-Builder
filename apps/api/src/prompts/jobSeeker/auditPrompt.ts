@@ -30,7 +30,7 @@ SKEMA JSON WAJIB:
   "careerFit": [{ "role": string, "fit": number (0-100), "reason": string }]
 }`;
 
-/** JOB_SEEKER_AUDIT_V1 - the free audit. Guests included; nothing about the user is assumed. */
+/** JOB_SEEKER_AUDIT_V1 - the account audit. Nothing about the user is assumed. */
 export function buildJobSeekerAuditPrompt(input: { cvText: string }): PromptPayload {
   return buildPrompt({
     version: 'JOB_SEEKER_AUDIT_V1',
