@@ -21,6 +21,18 @@ export interface CreateDocumentInput {
   isEphemeral?: boolean;
 }
 
+export type CvAnalysisWithFileName = CvAnalysis & {
+  document: Pick<CvDocument, 'fileName'> | null;
+};
+
+export type CvEnhancementWithFileName = CvEnhancement & {
+  sourceDocument: Pick<CvDocument, 'fileName'> | null;
+};
+
+export type CvEnhancementWithSource = CvEnhancement & {
+  sourceDocument: Pick<CvDocument, 'fileName' | 'textContent'> | null;
+};
+
 export class CvRepository {
   async createDocument(input: CreateDocumentInput): Promise<CvDocument> {
     return getPrisma().cvDocument.create({
@@ -71,11 +83,17 @@ export class CvRepository {
     userId: string,
     skip: number,
     take: number,
-  ): Promise<{ items: CvAnalysis[]; total: number }> {
+  ): Promise<{ items: CvAnalysisWithFileName[]; total: number }> {
     const prisma = getPrisma();
     const where = { userId };
     const [items, total] = await Promise.all([
-      prisma.cvAnalysis.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.cvAnalysis.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        include: { document: { select: { fileName: true } } },
+      }),
       prisma.cvAnalysis.count({ where }),
     ]);
     return { items, total };
@@ -121,15 +139,29 @@ export class CvRepository {
     return getPrisma().cvEnhancement.findUnique({ where: { id } });
   }
 
+  /** Reads the source through the relation so a deleted CV still has its file name. */
+  async findEnhancementWithSource(id: string): Promise<CvEnhancementWithSource | null> {
+    return getPrisma().cvEnhancement.findUnique({
+      where: { id },
+      include: { sourceDocument: { select: { fileName: true, textContent: true } } },
+    });
+  }
+
   async listEnhancements(
     userId: string,
     skip: number,
     take: number,
-  ): Promise<{ items: CvEnhancement[]; total: number }> {
+  ): Promise<{ items: CvEnhancementWithFileName[]; total: number }> {
     const prisma = getPrisma();
     const where = { userId };
     const [items, total] = await Promise.all([
-      prisma.cvEnhancement.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.cvEnhancement.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        include: { sourceDocument: { select: { fileName: true } } },
+      }),
       prisma.cvEnhancement.count({ where }),
     ]);
     return { items, total };

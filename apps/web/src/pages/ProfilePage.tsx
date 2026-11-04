@@ -133,6 +133,11 @@ export function ProfilePage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-8 px-6 py-16">
+      {/* At the top on purpose: this page is long and sits outside the dashboard shell. */}
+      <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
+        ← Kembali ke beranda
+      </Link>
+
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Profil</h1>

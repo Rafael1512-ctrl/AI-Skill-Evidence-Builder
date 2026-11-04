@@ -104,6 +104,16 @@ describe('ProfilePage', () => {
     );
   });
 
+  it('offers a way back to the home page', async () => {
+    respondWithProfile();
+    renderProfile();
+
+    expect(await screen.findByRole('link', { name: /kembali ke beranda/i })).toHaveAttribute(
+      'href',
+      '/',
+    );
+  });
+
   it('saves the form through PATCH and reports success', async () => {
     respondWithProfile();
     const { user } = renderProfile();

@@ -62,6 +62,9 @@
     ]
   },
   "allowScripts": {
-    "puppeteer@25.12.0": true
+    "puppeteer@25.12.0": true,
+    "@prisma/engines@7.10.0": true,
+    "prisma@7.10.0": true,
+    "esbuild@0.28.2": true
   }
 }

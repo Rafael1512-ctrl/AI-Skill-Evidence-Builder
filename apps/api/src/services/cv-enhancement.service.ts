@@ -58,7 +58,10 @@ export class CvEnhancementService {
     private readonly pricing: PricingService = pricingService,
   ) {}
 
-  private toDetail(enhancement: CvEnhancement, originalText: string): CvEnhancementDetail {
+  private toDetail(
+    enhancement: CvEnhancement,
+    source: { fileName: string | null; originalText: string },
+  ): CvEnhancementDetail {
     return {
       id: enhancement.id,
       sourceDocumentId: enhancement.sourceDocumentId,
@@ -71,7 +74,8 @@ export class CvEnhancementService {
       creditsCharged: enhancement.creditsCharged,
       createdAt: enhancement.createdAt.toISOString(),
       completedAt: enhancement.completedAt?.toISOString() ?? null,
-      originalText,
+      fileName: source.fileName,
+      originalText: source.originalText,
       promptVersion: enhancement.promptVersion ?? ENHANCE_PROMPT_VERSION,
     };
   }
@@ -193,7 +197,12 @@ export class CvEnhancementService {
         cvEnhancementId: enhancement.id,
       });
 
-      return { enhancement: this.toDetail(updated, extracted.text) };
+      return {
+        enhancement: this.toDetail(updated, {
+          fileName: file.fileName,
+          originalText: extracted.text,
+        }),
+      };
     } catch (error) {
       if (!settled) {
         await this.credits
@@ -216,16 +225,16 @@ export class CvEnhancementService {
 
   /** Owner-scoped detail, including the original text needed for Before vs After. */
   async getEnhancement(enhancementId: string, userId: string): Promise<CvEnhancementDetail> {
-    const enhancement = await this.repository.findEnhancement(enhancementId);
+    const enhancement = await this.repository.findEnhancementWithSource(enhancementId);
     if (!enhancement || enhancement.userId !== userId) {
       throw AppError.notFound('Hasil peningkatan CV tidak ditemukan.');
     }
 
-    const originalText = enhancement.sourceDocumentId
-      ? ((await this.repository.findDocument(enhancement.sourceDocumentId))?.textContent ?? '')
-      : '';
-
-    return this.toDetail(enhancement, originalText);
+    return this.toDetail(enhancement, {
+      fileName: enhancement.sourceDocument?.fileName ?? null,
+      // Deleting a CV clears its text, so a deleted source reads as empty here.
+      originalText: enhancement.sourceDocument?.textContent ?? '',
+    });
   }
 }
 

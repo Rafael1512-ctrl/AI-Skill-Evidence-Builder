@@ -200,9 +200,12 @@ export type EnhanceCvUploadBody = z.infer<typeof enhanceCvUploadBodySchema>;
  * A stored enhancement as the API returns it.
  *
  * `originalText` is the extracted text of the source CV, returned only to its owner so
- * the web client can render the Before vs After comparison without a second upload.
+ * the web client can render the Before vs After comparison without a second upload. It is
+ * empty once the owner has deleted the source CV.
  */
 export const cvEnhancementDetailSchema = cvEnhancementRecordSchema.extend({
+  /** Name of the uploaded CV. It outlives the CV text, which the owner can delete. */
+  fileName: z.string().nullable().default(null),
   originalText: z.string(),
   promptVersion: z.string().min(1).max(64),
 });

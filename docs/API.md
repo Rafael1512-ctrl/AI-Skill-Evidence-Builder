@@ -81,6 +81,13 @@ runtime chance (`PROJECT_CONTEXT.md` §6):
 | GET    | `/cv/analyses/:analysisId`               | session | 0                                   |
 | DELETE | `/cv/documents/:documentId`              | session | 0                                   |
 
+`GET /cv/history` is paginated (`page`, `pageSize`) and scoped to the signed-in account; each
+`analyses` and `enhancements` row carries `fileName` (null when the row has no source document). The
+web app reads it at `/audit/history` and `/enhance/history`; the owner-scoped
+`GET /cv/analyses/:analysisId` and `GET /cv/enhancements/:enhancementId` back their detail routes.
+An enhancement stays readable when it failed (`document: null`) or when its source CV was deleted
+(`originalText: ''`, `fileName` kept). Exporting from history is charged like any other export.
+
 Uploads are `multipart/form-data`. The audit requires a session. Each account receives
 `LIMITS.FREE_CV_AUDITS_PER_DAY` (5) successful audits per Jakarta calendar day; a request that
 fails before producing a stored analysis releases its quota reservation. Later audits reserve and

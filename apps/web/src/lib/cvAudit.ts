@@ -9,6 +9,7 @@ import {
 
 import { apiRequest, apiUpload } from './api.js';
 import { useAuth } from './auth.js';
+import { cvHistoryQueryKey } from './cvHistory.js';
 
 export function auditUsageQueryKey(token: string | null) {
   return ['cv-audit-usage', token] as const;
@@ -40,6 +41,8 @@ export function useAuditCvMutation() {
       apiUpload('/api/cv/audit', { file, token, schema: cvAuditResponseSchema }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: auditUsageQueryKey(token) });
+      // Otherwise the new audit stays out of the history until the cache goes stale.
+      void queryClient.invalidateQueries({ queryKey: cvHistoryQueryKey(token) });
     },
   });
 }

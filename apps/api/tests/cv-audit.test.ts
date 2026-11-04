@@ -2,7 +2,12 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { LIMITS, cvAuditResponseSchema } from '@aseb/shared';
+import {
+  LIMITS,
+  cvAnalysisDetailSchema,
+  cvAuditResponseSchema,
+  cvHistoryResponseSchema,
+} from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
 import { AppError } from '../src/utils/errors.js';
@@ -166,14 +171,22 @@ describe('CV audit API', () => {
       id: auditId,
       kind: 'FREE_AUDIT',
       documentId: expect.any(String),
+      fileName: 'cv.pdf',
     });
     expect(history.body.data.totals).toEqual({ analyses: 1, enhancements: 0 });
+    expect(cvHistoryResponseSchema.safeParse(history.body.data).success).toBe(true);
 
     const detail = await request(app).get(`/api/cv/analyses/${auditId}`).set(bearer(session));
     expect(detail.status).toBe(200);
     expect(detail.body.data.result.promptVersion).toBe('JOB_SEEKER_AUDIT_V1');
+    expect(cvAnalysisDetailSchema.safeParse(detail.body.data).success).toBe(true);
 
     const stranger = await signUpDevUser(app);
+    const strangerHistory = await request(app).get('/api/cv/history').set(bearer(stranger));
+    expect(strangerHistory.status).toBe(200);
+    expect(strangerHistory.body.data.analyses).toEqual([]);
+    expect(strangerHistory.body.data.totals.analyses).toBe(0);
+
     const forbidden = await request(app).get(`/api/cv/analyses/${auditId}`).set(bearer(stranger));
     expect(forbidden.status).toBe(404);
 

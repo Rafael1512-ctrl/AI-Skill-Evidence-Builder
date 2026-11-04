@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { cvEnhancementResponseSchema } from '@aseb/shared';
+import { cvEnhancementResponseSchema, cvHistoryResponseSchema } from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
@@ -267,9 +267,11 @@ describe('CV enhancement API', () => {
     expect(history.body.data.enhancements[0]).toMatchObject({
       id: enhancementId,
       status: 'COMPLETED',
+      fileName: 'cv.pdf',
       creditsCharged: 5,
       promptVersion: 'JOB_SEEKER_ENHANCE_V1',
     });
+    expect(cvHistoryResponseSchema.safeParse(history.body.data).success).toBe(true);
 
     const detail = await request(app)
       .get(`/api/cv/enhancements/${enhancementId}`)
@@ -277,11 +279,49 @@ describe('CV enhancement API', () => {
     expect(detail.status).toBe(200);
     expect(cvEnhancementResponseSchema.safeParse(detail.body.data).success).toBe(true);
     expect(detail.body.data.enhancement.originalText).toContain('Budi Santoso');
+    expect(detail.body.data.enhancement.fileName).toBe('cv.pdf');
 
     const stranger = await signUpDevUser(app);
+    const strangerHistory = await request(app).get('/api/cv/history').set(bearer(stranger));
+    expect(strangerHistory.status).toBe(200);
+    expect(strangerHistory.body.data.enhancements).toEqual([]);
+    expect(strangerHistory.body.data.totals.enhancements).toBe(0);
+
     const forbidden = await request(app)
       .get(`/api/cv/enhancements/${enhancementId}`)
       .set(bearer(stranger));
     expect(forbidden.status).toBe(404);
+  });
+
+  it('keeps a failed enhancement readable in history, without a result or a charge', async () => {
+    const { getMockProvider } = await import('../src/providers/ai/index.js');
+    getMockProvider().configure({ failNext: 1 });
+    await enhance(buildTextPdf(CV_LINES));
+
+    const history = await request(app).get('/api/cv/history').set(bearer(session));
+    const [row] = history.body.data.enhancements;
+    expect(row).toMatchObject({ status: 'FAILED', fileName: 'cv.pdf', creditsCharged: 0 });
+
+    const detail = await request(app)
+      .get(`/api/cv/enhancements/${row.id}`)
+      .set(bearer(session));
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.enhancement).toMatchObject({ status: 'FAILED', document: null });
+  });
+
+  it('still opens an enhancement after its source CV is deleted', async () => {
+    const created = await enhance(buildTextPdf(CV_LINES));
+    const { id, sourceDocumentId } = created.body.data.enhancement;
+
+    const removed = await request(app)
+      .delete(`/api/cv/documents/${sourceDocumentId}`)
+      .set(bearer(session));
+    expect(removed.status).toBe(204);
+
+    const detail = await request(app).get(`/api/cv/enhancements/${id}`).set(bearer(session));
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.enhancement.originalText).toBe('');
+    expect(detail.body.data.enhancement.fileName).toBe('cv.pdf');
+    expect(detail.body.data.enhancement.document).not.toBeNull();
   });
 });

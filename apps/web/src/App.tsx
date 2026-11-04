@@ -6,8 +6,12 @@ import { DashboardShell } from './components/DashboardShell.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { AuthProvider } from './lib/auth.js';
 import { AdminPage } from './pages/AdminPage.js';
+import { AuditDetailPage } from './pages/AuditDetailPage.js';
+import { AuditHistoryPage } from './pages/AuditHistoryPage.js';
 import { AuditPage } from './pages/AuditPage.js';
 import { CreditsPage } from './pages/CreditsPage.js';
+import { EnhancementDetailPage } from './pages/EnhancementDetailPage.js';
+import { EnhancementHistoryPage } from './pages/EnhancementHistoryPage.js';
 import { EnhancePage } from './pages/EnhancePage.js';
 import { HrdDashboardPage } from './pages/HrdDashboardPage.js';
 import { HomePage } from './pages/HomePage.js';
@@ -63,6 +67,26 @@ export function App() {
               }
             />
             <Route
+              path="/audit/history"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="job-seeker">
+                    <AuditHistoryPage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/audit/history/:analysisId"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="job-seeker">
+                    <AuditDetailPage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/dashboard/job-seeker"
               element={
                 <ProtectedRoute>
@@ -98,6 +122,26 @@ export function App() {
                 <ProtectedRoute>
                   <DashboardShell role="job-seeker">
                     <EnhancePage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/enhance/history"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="job-seeker">
+                    <EnhancementHistoryPage />
+                  </DashboardShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/enhance/history/:enhancementId"
+              element={
+                <ProtectedRoute>
+                  <DashboardShell role="job-seeker">
+                    <EnhancementDetailPage />
                   </DashboardShell>
                 </ProtectedRoute>
               }

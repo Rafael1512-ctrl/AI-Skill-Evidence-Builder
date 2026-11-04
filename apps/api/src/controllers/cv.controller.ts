@@ -83,6 +83,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
         documentId: analysis.documentId,
         kind: analysis.kind,
         atsScore: analysis.atsScore,
+        fileName: analysis.document?.fileName ?? null,
         provider: analysis.provider,
         model: analysis.model,
         createdAt: analysis.createdAt.toISOString(),
@@ -90,6 +91,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
       enhancements: enhancements.items.map((enhancement) => ({
         id: enhancement.id,
         sourceDocumentId: enhancement.sourceDocumentId,
+        fileName: enhancement.sourceDocument?.fileName ?? null,
         status: enhancement.status,
         templateKey: enhancement.templateKey,
         creditsCharged: enhancement.creditsCharged,

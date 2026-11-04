@@ -4,7 +4,9 @@ import {
   ArrowLeftRight,
   BriefcaseBusiness,
   Coins,
+  FileClock,
   FileSearch,
+  History,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -51,8 +53,11 @@ const WORKSPACES: Record<
     avatarAccent: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
     nav: [
       { label: 'Ringkasan', to: '/dashboard/job-seeker', icon: LayoutDashboard, end: true },
-      { label: 'Audit CV', to: '/audit', icon: FileSearch },
-      { label: 'Peningkatan CV', to: '/enhance', icon: Sparkles },
+      // `end` keeps these items inactive on their history routes, which have their own entries.
+      { label: 'Audit CV', to: '/audit', icon: FileSearch, end: true },
+      { label: 'Riwayat Audit', to: '/audit/history', icon: History },
+      { label: 'Peningkatan CV', to: '/enhance', icon: Sparkles, end: true },
+      { label: 'Riwayat Peningkatan', to: '/enhance/history', icon: FileClock },
     ],
   },
   hrd: {

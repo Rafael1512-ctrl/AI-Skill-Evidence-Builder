@@ -100,7 +100,8 @@ TanStack Query owns server state (polling a running batch, invalidating after a 
 the pages render the stored results and never recompute a derived number.
 
 Routes: `/` role-first landing, `/dashboard/job-seeker` and `/dashboard/hrd` (the same account can
-open either workspace), `/audit`, `/enhance`, `/profile`, `/credits`, `/screening`,
+open either workspace), `/audit`, `/audit/history`, `/audit/history/:analysisId`, `/enhance`,
+`/enhance/history`, `/enhance/history/:enhancementId`, `/profile`, `/credits`, `/screening`,
 `/screening/:jobId` and `/signin`. `/admin` is intentionally not linked from user navigation; it is
 entered directly and remains server-authorized.
 

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import {
   cvEnhancementResponseSchema,
@@ -8,6 +8,7 @@ import {
 
 import { apiUpload } from './api.js';
 import { useAuth } from './auth.js';
+import { cvHistoryQueryKey } from './cvHistory.js';
 
 export interface EnhanceCvVariables {
   file: File;
@@ -23,6 +24,7 @@ export interface EnhanceCvVariables {
  */
 export function useEnhanceCvMutation() {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
 
   return useMutation<CvEnhancementDetail, Error, EnhanceCvVariables>({
     mutationFn: async ({ file, options }) => {
@@ -33,6 +35,10 @@ export function useEnhanceCvMutation() {
         schema: cvEnhancementResponseSchema,
       });
       return response.enhancement;
+    },
+    // Settled, not success: a failed attempt is stored too and belongs in the history.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: cvHistoryQueryKey(token) });
     },
   });
 }

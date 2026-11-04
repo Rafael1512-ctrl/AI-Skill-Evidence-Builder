@@ -1552,6 +1552,18 @@ dev:worker` plus one uploaded batch is enough.
     directly and remains guarded by the server. No raster asset generator was available in this
     environment, so the homepage visual is rendered from React/Tailwind rather than adding an
     external image dependency.
+66. **Audit history pages** (2026-11-04, added). `/audit/history` lists the signed-in account's
+    stored audits (paginated, both `FREE_AUDIT` and `DEEP_ANALYSIS`) and
+    `/audit/history/:analysisId` shows one with the `AuditResultView` component the audit page uses.
+    History is per account: `listAnalyses` filters by `userId`, the detail read answers 404 to
+    anyone but the owner, and the client query keys carry the token. `GET /cv/history` rows gained
+    `fileName`; no schema change was needed.
+67. **Enhancement history pages** (2026-11-04, added). `/enhance/history` and
+    `/enhance/history/:enhancementId` mirror the audit history and its per-account rules; the detail
+    reuses `EnhancementResultView`, including the paid PDF export. A row can be `FAILED` or still
+    processing, so the detail shows a status notice instead of a result and never surfaces the
+    internal `failureReason`. `getEnhancement` now reads the source through the relation, so a
+    deleted CV keeps its file name and returns empty `originalText`. No schema change was needed.
 
 ---
 

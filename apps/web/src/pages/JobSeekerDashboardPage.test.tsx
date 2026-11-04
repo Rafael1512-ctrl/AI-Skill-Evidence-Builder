@@ -100,6 +100,7 @@ describe('JobSeekerDashboardPage', () => {
                 documentId: 'doc-1',
                 kind: 'FREE_AUDIT',
                 atsScore: 82,
+                fileName: 'cv.pdf',
                 provider: 'mock',
                 model: 'mock-v1',
                 createdAt: '2026-11-04T09:00:00.000Z',
@@ -109,6 +110,7 @@ describe('JobSeekerDashboardPage', () => {
               {
                 id: 'enh-1',
                 sourceDocumentId: 'doc-2',
+                fileName: 'cv.pdf',
                 status: 'COMPLETED',
                 templateKey: 'ATS_MINIMAL',
                 creditsCharged: 5,
