@@ -167,6 +167,11 @@ describe('screening results and reports API', () => {
     for (const name of names) call = call.attach('files', buildTextPdf(CV_LINES), name);
     const response = await call;
     expect(response.status, JSON.stringify(response.body)).toBe(201);
+
+    const started = await request(app)
+      .post(`/api/screening/jobs/${jobId}/start`)
+      .set(bearer(session));
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
   }
 
   /**
@@ -323,12 +328,12 @@ describe('screening results and reports API', () => {
     expect(report.fileName).toMatch(/^laporan-screening-.+-\d{4}-\d{2}-\d{2}\.csv$/);
 
     const csv = Buffer.from(report.contentBase64, 'base64').toString('utf8');
-    expect(csv).toContain('kandidat');
+    expect(csv).toContain('Kandidat');
     // The label is derived from the uploaded file name (`andi.pdf`), so it is lowercase.
     expect(csv).toContain('andi.pdf');
     expect(csv.toLowerCase()).toContain('andi');
     expect(csv).toContain('Pengalaman Node.js');
-    expect(csv).toContain('FOUND');
+    expect(csv).toContain('Bukti ditemukan');
 
     const stored = await ctx.prisma.generatedReport.findMany({ where: { screeningJobId: jobId } });
     expect(stored).toHaveLength(1);

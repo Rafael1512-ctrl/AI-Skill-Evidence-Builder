@@ -1,9 +1,11 @@
 import type { Express } from 'express';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { LIMITS, screeningBatchUploadResultSchema } from '@aseb/shared';
 
+import { setScreeningQueue } from '../src/queues/index.js';
+import type { ScreeningQueue } from '../src/queues/types.js';
 import { creditService } from '../src/services/credit.service.js';
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
@@ -37,6 +39,20 @@ describe('screening batch upload API', () => {
   let ctx: Awaited<ReturnType<typeof useTestDatabase>>;
   let app: Express;
   let session: DevSession;
+  let enqueued: Array<{ jobId: string; candidateIds: readonly string[] }>;
+  let brokerDown: boolean;
+
+  /** Records what reaches the queue, so a test can prove that upload alone queues nothing. */
+  const recordingQueue: ScreeningQueue = {
+    driver: 'in-process',
+    enqueueCandidates: async (input) => {
+      if (brokerDown) throw new Error('broker down');
+      enqueued.push(input);
+    },
+    start: async () => undefined,
+    stop: async () => undefined,
+    waitForIdle: async () => undefined,
+  };
 
   beforeAll(async () => {
     ctx = await useTestDatabase();
@@ -50,7 +66,14 @@ describe('screening batch upload API', () => {
   beforeEach(async () => {
     await ctx.db.reset();
     resetRateLimits();
+    enqueued = [];
+    brokerDown = false;
+    setScreeningQueue(recordingQueue);
     session = await signUpDevUser(app);
+  });
+
+  afterEach(() => {
+    setScreeningQueue(null);
   });
 
   async function createJob(target: DevSession = session): Promise<string> {
@@ -81,6 +104,10 @@ describe('screening batch upload API', () => {
       call = call.attach('files', file.buffer, file.name);
     }
     return call;
+  }
+
+  function start(jobId: string, target: DevSession = session) {
+    return request(app).post(`/api/screening/jobs/${jobId}/start`).set(bearer(target));
   }
 
   function list(jobId: string, query = '', target: DevSession = session) {
@@ -130,9 +157,8 @@ describe('screening batch upload API', () => {
   /* Happy path                                                          */
   /* ------------------------------------------------------------------ */
 
-  it('stores a batch as QUEUED and reserves credits for every accepted CV', async () => {
+  it('stores an uploaded batch without running it or holding credits', async () => {
     const jobId = await createJob();
-    await grantCredits(10);
 
     const response = await upload(jobId, [
       { buffer: buildTextPdf(CV_LINES), name: 'andi-pratama.pdf' },
@@ -150,15 +176,15 @@ describe('screening batch upload API', () => {
     expect(
       batch.accepted.map((candidate: { candidateName: string }) => candidate.candidateName),
     ).toEqual(['andi pratama', 'budi santoso']);
-    expect(batch.creditsReserved).toBeGreaterThan(0);
-    expect(batch.reservationId).toBeTruthy();
+    expect(batch.creditsReserved).toBe(0);
+    expect(batch.reservationId).toBeNull();
 
-    // The job moved to QUEUED and its counters agree with the stored rows.
-    expect(batch.job.state).toBe('QUEUED');
+    // The job waits for the recruiter, and its counters agree with the stored rows.
+    expect(batch.job.state).toBe('CREATED');
     expect(batch.job.totalCandidates).toBe(2);
     expect(batch.job.queuedCandidates).toBe(2);
     expect(batch.job.completedCandidates).toBe(0);
-    expect(batch.job.creditsReserved).toBe(batch.creditsReserved);
+    expect(batch.job.creditsReserved).toBe(0);
 
     const rows = await ctx.prisma.screeningCandidate.findMany({
       where: { jobId },
@@ -170,17 +196,100 @@ describe('screening batch upload API', () => {
     expect(rows[0]?.textHash).toHaveLength(64);
     expect(rows[0]?.pageCount).toBe(1);
 
-    const reservation = await ctx.prisma.creditReservation.findFirst({
-      where: { id: batch.reservationId },
-    });
-    expect(reservation?.state).toBe('ACTIVE');
-    expect(reservation?.reservedCredits).toBe(batch.creditsReserved);
-    expect(reservation?.referenceType).toBe('screening_job');
-    expect(reservation?.referenceId).toBe(jobId);
+    expect(enqueued).toEqual([]);
+    expect(await ctx.prisma.creditReservation.count()).toBe(0);
 
     const events = await ctx.prisma.screeningJobEvent.findMany({ where: { jobId } });
     expect(events.filter((event) => event.type === 'CANDIDATE_QUEUED')).toHaveLength(2);
     expect(events.filter((event) => event.type === 'STATE_CHANGED')).toHaveLength(2);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Starting a batch                                                    */
+  /* ------------------------------------------------------------------ */
+
+  it('holds credits and queues every candidate when the recruiter starts', async () => {
+    const jobId = await createJob();
+    await grantCredits(10);
+    await upload(jobId, [
+      { buffer: buildTextPdf(CV_LINES), name: 'andi.pdf' },
+      { buffer: buildTextPdf(CV_LINES), name: 'budi.pdf' },
+    ]);
+
+    const response = await start(jobId);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.data.job.state).toBe('QUEUED');
+    expect(response.body.data.job.creditsReserved).toBeGreaterThan(0);
+
+    const rows = await ctx.prisma.screeningCandidate.findMany({ where: { jobId } });
+    expect(enqueued).toHaveLength(1);
+    expect([...(enqueued[0]?.candidateIds ?? [])].sort()).toEqual(
+      rows.map((row) => row.id).sort(),
+    );
+
+    const reservation = await ctx.prisma.creditReservation.findFirst();
+    expect(reservation).toMatchObject({
+      state: 'ACTIVE',
+      feature: 'HRD_SCREEN_PER_CV',
+      referenceType: 'screening_job',
+      referenceId: jobId,
+      reservedCredits: response.body.data.job.creditsReserved,
+    });
+  });
+
+  it('holds credits only once when a batch is started twice', async () => {
+    const jobId = await createJob();
+    await grantCredits(10);
+    await upload(jobId, [{ buffer: buildTextPdf(CV_LINES), name: 'andi.pdf' }]);
+
+    expect((await start(jobId)).status).toBe(201);
+    const second = await start(jobId);
+
+    expect(second.status).toBe(409);
+    expect(enqueued).toHaveLength(1);
+    expect(await ctx.prisma.creditReservation.count()).toBe(1);
+  });
+
+  it('refuses to start a job that has no candidates', async () => {
+    const jobId = await createJob();
+    await grantCredits(10);
+
+    const response = await start(jobId);
+
+    expect(response.status).toBe(409);
+    expect(await ctx.prisma.creditReservation.count()).toBe(0);
+  });
+
+  it('hides a batch from another account', async () => {
+    const jobId = await createJob();
+    await grantCredits(10);
+    await upload(jobId, [{ buffer: buildTextPdf(CV_LINES), name: 'andi.pdf' }]);
+
+    const stranger = await signUpDevUser(app);
+    const response = await start(jobId, stranger);
+
+    expect(response.status).toBe(404);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('returns the hold and lets the recruiter retry when the queue is down', async () => {
+    const jobId = await createJob();
+    await grantCredits(10);
+    await upload(jobId, [{ buffer: buildTextPdf(CV_LINES), name: 'andi.pdf' }]);
+
+    brokerDown = true;
+    const failed = await start(jobId);
+
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    const job = await ctx.prisma.screeningJob.findUnique({ where: { id: jobId } });
+    expect(job).toMatchObject({ state: 'CREATED', reservationId: null, creditsReserved: 0 });
+    const reservation = await ctx.prisma.creditReservation.findFirst();
+    expect(reservation?.state).toBe('RELEASED');
+
+    brokerDown = false;
+    expect((await start(jobId)).status).toBe(201);
+    expect(enqueued).toHaveLength(1);
   });
 
   /* ------------------------------------------------------------------ */
@@ -205,12 +314,12 @@ describe('screening batch upload API', () => {
       code: 'UNSUPPORTED_FILE',
     });
 
-    // Only the accepted CV is held: a rejected file must never cost a credit.
-    const reservation = await ctx.prisma.creditReservation.findFirst({
-      where: { id: batch.reservationId },
-    });
-    expect(reservation?.reservedCredits).toBe(batch.creditsReserved);
+    // Only the accepted CV counts: a rejected file must never cost a credit.
     expect(await ctx.prisma.screeningCandidate.count({ where: { jobId } })).toBe(1);
+    const started = await start(jobId);
+    const reservation = await ctx.prisma.creditReservation.findFirst();
+    expect(reservation?.reservedCredits).toBe(started.body.data.job.creditsReserved);
+    expect(started.body.data.job.totalCandidates).toBe(1);
   });
 
   it('accepts a ZIP batch and reports the non-PDF entries', async () => {
@@ -310,22 +419,25 @@ describe('screening batch upload API', () => {
     expect(await ctx.prisma.creditReservation.count()).toBe(0);
   });
 
-  it('refuses an unaffordable batch and leaves the job untouched', async () => {
+  it('keeps the uploaded list when an unaffordable batch is started', async () => {
     const jobId = await createJob();
 
-    const response = await upload(jobId, [
+    const uploaded = await upload(jobId, [
       { buffer: buildTextPdf(CV_LINES), name: 'andi.pdf' },
       { buffer: buildTextPdf(CV_LINES), name: 'budi.pdf' },
     ]);
+    expect(uploaded.status).toBe(201);
+
+    const response = await start(jobId);
 
     expect(response.status).toBe(402);
     expect(response.body.error.code).toBe('INSUFFICIENT_CREDITS');
-    expect(await ctx.prisma.screeningCandidate.count()).toBe(0);
+    expect(enqueued).toEqual([]);
+    expect(await ctx.prisma.screeningCandidate.count({ where: { jobId } })).toBe(2);
     expect(await ctx.prisma.creditReservation.count()).toBe(0);
 
     const job = await ctx.prisma.screeningJob.findUnique({ where: { id: jobId } });
     expect(job?.state).toBe('CREATED');
-    expect(job?.totalCandidates).toBe(0);
     expect(job?.reservationId).toBeNull();
   });
 

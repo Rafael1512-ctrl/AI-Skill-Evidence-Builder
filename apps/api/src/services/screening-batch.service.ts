@@ -4,6 +4,7 @@ import {
   type ScreeningBatchUploadResult,
   type ScreeningCandidateList,
   type ScreeningCandidateSummary,
+  type ScreeningJobDetail,
 } from '@aseb/shared';
 
 import { env } from '../config/env.js';
@@ -90,11 +91,9 @@ function toCandidateSummary(candidate: ScreeningCandidateSummarySource): Screeni
  *
  * Accepts up to `LIMITS.MAX_SCREENING_CVS` PDFs, or one ZIP of the same size, extracts
  * their text immediately (no OCR - a scanned PDF is reported as rejected) and stores the
- * candidates as `QUEUED`. Credits for the accepted CVs are reserved before the batch is
- * persisted; nothing is queued, and nothing is charged, for a file that failed.
- *
- * Queueing (Phase 12) and evidence extraction (Phase 13) are intentionally out of scope:
- * the reservation stays `ACTIVE` until a worker settles or releases it per candidate.
+ * candidates as `QUEUED` under a job that stays `CREATED`. Uploading only builds the list;
+ * `startProcessing` is what reserves credits and queues the work, so nothing runs or costs
+ * anything until the recruiter asks for it.
  */
 export class ScreeningBatchService {
   constructor(
@@ -252,47 +251,10 @@ export class ScreeningBatchService {
       );
     }
 
-    // Reserve before persisting: an unaffordable batch must leave no rows behind.
-    const reservation = await this.credits.reserve({
-      userId,
-      feature: SCREENING_FEATURE,
-      quantity: accepted.length,
-      referenceType: 'screening_job',
-      referenceId: jobId,
+    const created = await this.repository.createCandidatesForJob({
+      jobId,
+      candidates: accepted,
     });
-
-    let created: ScreeningCandidateSummarySource[];
-    try {
-      created = await this.repository.createCandidatesForJob({
-        jobId,
-        candidates: accepted,
-        reservationId: reservation.id,
-        creditsReserved: reservation.reservedCredits,
-      });
-    } catch (error) {
-      // The hold must not survive a batch that was never recorded.
-      await this.credits
-        .release(reservation.id, 'screening-batch-persist-failed')
-        .catch(() => undefined);
-      throw error;
-    }
-
-    // Queueing is best-effort relative to the batch: the rows and the credit hold are
-    // already committed, so a broker problem must be recorded, not rolled back.
-    try {
-      await getScreeningQueue().enqueueCandidates({
-        jobId,
-        candidateIds: created.map((candidate) => candidate.id),
-      });
-    } catch (error) {
-      logger.error({ err: error, jobId }, 'Could not enqueue the screening batch');
-      await this.repository.recordJobEvent({
-        jobId,
-        type: 'ERROR',
-        message: 'Kandidat tersimpan tetapi gagal dimasukkan ke antrean pemrosesan.',
-        payload: { candidateCount: created.length },
-      });
-    }
 
     const summary = await this.jobs.jobSummary(userId, jobId);
 
@@ -302,9 +264,71 @@ export class ScreeningBatchService {
       rejected,
       acceptedCount: created.length,
       rejectedCount: rejected.length,
-      creditsReserved: reservation.reservedCredits,
-      reservationId: reservation.id,
+      creditsReserved: 0,
+      reservationId: null,
     };
+  }
+
+  /**
+   * Starts an uploaded batch: the recruiter's explicit go-ahead.
+   *
+   * Credits are held here rather than at upload, before any model call, so an unaffordable
+   * batch answers `402` and leaves the uploaded list in place. `beginJob` claims the job
+   * atomically, which makes a double click release its second hold instead of queueing twice.
+   */
+  async startProcessing(userId: string, jobId: string): Promise<ScreeningJobDetail> {
+    const job = await this.repository.findJobById(jobId);
+    if (!job || job.userId !== userId) {
+      throw AppError.notFound('Sesi screening tidak ditemukan.');
+    }
+    if (job.totalCandidates === 0) {
+      throw AppError.conflict('Unggah batch CV terlebih dahulu.');
+    }
+    if (job.state !== 'CREATED') {
+      throw AppError.conflict('Sesi screening ini sudah dimulai.');
+    }
+
+    const reservation = await this.credits.reserve({
+      userId,
+      feature: SCREENING_FEATURE,
+      quantity: job.totalCandidates,
+      referenceType: 'screening_job',
+      referenceId: jobId,
+    });
+
+    const claimed = await this.repository.beginJob({
+      jobId,
+      reservationId: reservation.id,
+      creditsReserved: reservation.reservedCredits,
+    });
+    if (!claimed) {
+      await this.credits
+        .release(reservation.id, 'screening-start-already-claimed')
+        .catch(() => undefined);
+      throw AppError.conflict('Sesi screening ini sudah dimulai.');
+    }
+
+    try {
+      await getScreeningQueue().enqueueCandidates({
+        jobId,
+        candidateIds: await this.repository.listQueuedCandidateIds(jobId),
+      });
+    } catch (error) {
+      // Nothing ran, so the hold goes back and the job can be started again.
+      logger.error({ err: error, jobId }, 'Could not enqueue the screening batch');
+      await this.credits
+        .release(reservation.id, 'screening-enqueue-failed')
+        .catch(() => undefined);
+      await this.repository.revertJobStart(jobId);
+      await this.repository.recordJobEvent({
+        jobId,
+        type: 'ERROR',
+        message: 'Batch gagal dimasukkan ke antrean pemrosesan.',
+      });
+      throw AppError.upstream('Antrean pemrosesan sedang bermasalah. Silakan coba lagi.', error);
+    }
+
+    return this.jobs.getJob(userId, jobId);
   }
 
   async listCandidates(input: {

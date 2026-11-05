@@ -246,7 +246,7 @@ export class ScreeningRunnerService {
    * else is failed and its hold released, so cancelling never leaks reserved credits.
    */
   async cancelRemaining(jobId: string, reason: string): Promise<void> {
-    const failedCandidates = await this.repository.failOpenCandidates({
+    await this.repository.failOpenCandidates({
       jobId,
       reason,
       completedAt: new Date(),
@@ -276,7 +276,8 @@ export class ScreeningRunnerService {
         queued: 0,
         processing: 0,
         completed,
-        failed: (raw.FAILED ?? 0) + failedCandidates,
+        // Counted after `failOpenCandidates`, so this already includes the ones just failed.
+        failed: raw.FAILED ?? 0,
       },
     });
   }

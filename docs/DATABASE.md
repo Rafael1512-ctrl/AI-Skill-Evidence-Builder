@@ -176,13 +176,12 @@ Key details:
   `MAX_ZIP_UNCOMPRESSED_BYTES`, in the multipart field `files`. A second upload for a job
   that already has candidates is rejected with `409`, so `screening_jobs.reservation_id`
   and `credits_reserved` always describe exactly one batch.
-- **Credits are reserved per accepted CV before the batch is written.**
-  `HRD_SCREEN_PER_CV x accepted` is held through `CreditService.reserve` (the amount is
-  always resolved by the pricing service, never a literal) and linked to the job. If the
-  batch cannot be persisted, the hold is released again, so an `ACTIVE` reservation can
-  never exist without its candidates. The hold stays `ACTIVE` through Phase 11:
-  per-candidate settlement arrives with the queue (Phase 12) and evidence extraction
-  (Phase 13).
+- **Credits are reserved when the recruiter starts the batch, not at upload.** A job with
+  candidates stays `CREATED` until `POST /screening/jobs/:jobId/start`, which holds
+  `HRD_SCREEN_PER_CV x uploaded` through `CreditService.reserve` (the amount is always
+  resolved by the pricing service, never a literal) and links it to the job. The start is
+  claimed atomically, so a repeated request releases its own hold. If the queue refuses the
+  batch, the hold is released and the job returns to `CREATED`.
 - **Rejected files are never billed.** `ScreeningCandidate` rows are only written for CVs
   whose text extracted successfully; a scanned PDF, a non-PDF ZIP entry or an oversized
   file comes back in `rejected` and costs nothing.

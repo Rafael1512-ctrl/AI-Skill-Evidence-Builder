@@ -1,0 +1,12 @@
+import { getPrisma } from './db/prisma.js';
+import { screeningService } from './services/screening.service.js';
+import { screeningReportService } from './services/screening-report.service.js';
+const id = 'cmw3glhaj00b7h8ksgyb627w6';
+const job = await getPrisma().screeningJob.findUnique({ where: { id }, select: { userId: true } });
+const uid = job!.userId;
+const t = Date.now();
+const res = await Promise.allSettled(Array.from({ length: 24 }, (_, i) => i % 3 === 0 ? screeningService.getJob(uid, id) : i % 3 === 1 ? screeningService.progress(uid, id) : screeningReportService.getResults(uid, id)));
+const bad = res.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+console.log('parallel ok', res.length - bad.length, 'failed', bad.length, 'ms', Date.now() - t);
+console.log([...new Set(bad.map((r) => String(r.reason?.code ?? '') + ' ' + String(r.reason?.message).slice(0, 240)))].slice(0, 3).join('\n'));
+process.exit(0);

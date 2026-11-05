@@ -114,9 +114,11 @@ describe('screening report HTML', () => {
 
     expect(html).toContain('Laporan Screening: Backend Engineer');
     expect(html).toContain(SCREENING_METHODOLOGY_NOTE);
+    expect(html).toContain('Peringkat kandidat');
     expect(html).toContain('#1 Andi Pratama');
     expect(html).toContain('100/100');
-    expect(html).toContain('HIGH_MATCH');
+    expect(html).toContain('Sesuai');
+    expect(html).not.toContain('HIGH_MATCH');
     expect(html).toContain('Pengalaman minimal 3 tahun dengan Node.js');
     expect(html).toContain('lima tahun pengalaman Node.js, PostgreSQL, dan Docker');
     expect(html).toContain('Versi konfigurasi skor 1.0.0');
@@ -159,8 +161,9 @@ describe('screening report HTML', () => {
     );
 
     expect(html).toContain('belum dinilai');
-    expect(html).toContain('REQUIREMENT_NOT_MET');
-    expect(html).toContain('Syarat wajib belum terpenuhi: Wajib punya SIM A');
+    expect(html).toContain('Bukti tidak ditemukan');
+    expect(html).toContain('Syarat wajib belum terpenuhi');
+    expect(html).toContain('Wajib punya SIM A');
   });
 
   it('says so when a batch has no candidates', () => {
@@ -171,31 +174,71 @@ describe('screening report HTML', () => {
 });
 
 describe('screening report CSV', () => {
-  it('emits one row per evidence item with the documented columns', () => {
+  it('emits one labelled row per candidate with a status and quote per criterion', () => {
     const { columns, rows } = screeningReportCsvRows(
       reportInput([
         candidate({
           criteriaResults: [
             criterion({
+              criterion: 'Node.js',
               evidence: [
                 { quote: 'bukti satu', source: 'CV', page: null, url: null, note: null },
                 { quote: 'bukti dua', source: 'CV', page: null, url: null, note: null },
               ],
             }),
-            criterion({ requirementId: 'req-2', status: 'NOT_FOUND', evidence: [] }),
+            criterion({
+              requirementId: 'req-2',
+              criterion: 'Docker',
+              status: 'NOT_FOUND',
+              evidence: [],
+            }),
           ],
         }),
       ]),
     );
 
-    expect(rows).toHaveLength(3);
-    expect(rows[0]?.[columns.indexOf('kutipan')]).toBe('bukti satu');
-    expect(rows[1]?.[columns.indexOf('kutipan')]).toBe('bukti dua');
+    expect(rows).toHaveLength(1);
+    const row = rows[0] ?? [];
+    expect(row[columns.indexOf('Peringkat')]).toBe('1');
+    expect(row[columns.indexOf('Skor')]).toBe('100');
+    expect(row[columns.indexOf('Kelayakan')]).toBe('Sesuai');
+    expect(row[columns.indexOf('Status: Node.js')]).toBe('Bukti ditemukan');
+    expect(row[columns.indexOf('Bukti: Node.js')]).toBe('bukti satu | bukti dua');
     // A criterion with no evidence still appears, so the gap is visible in the report.
-    expect(rows[2]?.[columns.indexOf('kutipan')]).toBe('');
-    expect(rows[2]?.[columns.indexOf('status_bukti')]).toBe('NOT_FOUND');
-    expect(rows[0]?.[columns.indexOf('peringkat')]).toBe('1');
-    expect(rows[0]?.[columns.indexOf('skor')]).toBe('100');
+    expect(row[columns.indexOf('Status: Docker')]).toBe('Bukti tidak ditemukan');
+    expect(row[columns.indexOf('Bukti: Docker')]).toBe('');
+  });
+
+  it('keeps the columns aligned when a candidate lacks a criterion', () => {
+    const { columns, rows } = screeningReportCsvRows(
+      reportInput([
+        candidate({ criteriaResults: [criterion({ criterion: 'Node.js' })] }),
+        candidate({ candidateName: 'Budi', score: null, criteriaResults: [] }),
+      ]),
+    );
+
+    expect(rows[1]).toHaveLength(columns.length);
+    expect(rows[1]?.[columns.indexOf('Status: Node.js')]).toBe('');
+  });
+
+  it('stops a CV from planting a spreadsheet formula', () => {
+    const { columns, rows } = screeningReportCsvRows(
+      reportInput([
+        candidate({
+          candidateName: '=HYPERLINK("http://contoh.test","klik")',
+          criteriaResults: [
+            criterion({
+              evidence: [{ quote: '+1234', source: 'CV', page: null, url: null, note: null }],
+            }),
+          ],
+        }),
+      ]),
+    );
+
+    const row = rows[0] ?? [];
+    expect(row[columns.indexOf('Kandidat')]?.startsWith("'=")).toBe(true);
+    expect(row.some((cell) => cell.startsWith('='))).toBe(false);
+    expect(row.some((cell) => cell.startsWith('+'))).toBe(false);
   });
 
   it('round-trips commas, quotes and newlines through csv-stringify', () => {
@@ -213,12 +256,10 @@ describe('screening report CSV', () => {
     );
 
     const csv = stringify(rows, { header: true, columns });
-    const parsed = csv.trim().split('\n');
 
     // The quoted field survives, and the newline stays inside the quoted value.
     expect(csv).toContain('"Dia menulis ""Node.js"", PostgreSQL');
-    expect(parsed.length).toBeGreaterThan(2);
-    expect(rows[0]?.[columns.indexOf('halaman')]).toBe('2');
+    expect(csv.trim().split('\n').length).toBeGreaterThan(2);
   });
 
   it('lists a candidate with no scored criteria rather than dropping them', () => {
@@ -234,8 +275,8 @@ describe('screening report CSV', () => {
     );
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.[columns.indexOf('status_proses')]).toBe('QUEUED');
-    expect(rows[0]?.[columns.indexOf('skor')]).toBe('');
+    expect(rows[0]?.[columns.indexOf('Status Proses')]).toBe('Dalam antrean');
+    expect(rows[0]?.[columns.indexOf('Skor')]).toBe('');
   });
 });
 

@@ -63,8 +63,9 @@ export class ScreeningService {
       totalCandidates: job.totalCandidates,
       queuedCandidates: counts.QUEUED ?? 0,
       processingCandidates: counts.PROCESSING ?? 0,
-      completedCandidates: job.completedCandidates,
-      failedCandidates: job.failedCandidates,
+      // Counted from the candidates, so a running batch and an older one are both accurate.
+      completedCandidates: counts.COMPLETED ?? job.completedCandidates,
+      failedCandidates: counts.FAILED ?? job.failedCandidates,
       creditsReserved: job.creditsReserved,
       creditsCharged: job.creditsCharged,
       categoryWeights: toCategoryWeights(job.categoryWeights),

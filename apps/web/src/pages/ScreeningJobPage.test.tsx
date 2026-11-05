@@ -159,6 +159,15 @@ const fetchMock = vi.fn();
 
 const PRICING = [
   {
+    feature: 'HRD_SCREEN_PER_CV',
+    credits: 1,
+    label: 'Screening per CV',
+    description: 'Penilaian satu CV kandidat.',
+    isOverride: false,
+    sortOrder: 10,
+    updatedAt: null,
+  },
+  {
     feature: 'EVIDENCE_VERIFICATION',
     credits: 2,
     label: 'Verifikasi Bukti',
@@ -260,23 +269,13 @@ function respondWith({
     if (url.includes('/api/credits/wallet')) {
       return jsonResponse(walletBody(wallet));
     }
+    if (url.includes('/start') && init?.method === 'POST') {
+      return jsonResponse({ data: { job: { ...job, state: 'QUEUED' } } });
+    }
     if (url.includes('/verification/estimate')) {
       return jsonResponse(estimateBody(estimate));
     }
     if (url.includes('/verification') && init?.method === 'POST') {
-      if (url.includes('/candidates/')) {
-        return jsonResponse({
-          data: {
-            verification: {
-              candidateId: 'cand-1',
-              verificationStatus: 'SUPPORTED',
-              links: [],
-              creditsCharged: 2,
-              disabled: false,
-            },
-          },
-        });
-      }
       return jsonResponse({
         data: {
           verification: {
@@ -443,7 +442,7 @@ describe('ScreeningJobPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Gagal memuat hasil.');
   });
 
-  it('shows verified link evidence and confirms one candidate before spending credits', async () => {
+  it('shows verified link evidence without a per-candidate verification button', async () => {
     const withEvidence = {
       ...CANDIDATE_ANDI,
       githubEvidence: [
@@ -456,7 +455,6 @@ describe('ScreeningJobPage', () => {
         },
       ],
     };
-    const user = userEvent.setup();
     respondWith({
       candidates: [withEvidence],
       estimate: { eligibleCount: 1, totalCredits: 2, available: 10 },
@@ -466,27 +464,10 @@ describe('ScreeningJobPage', () => {
 
     expect(await screen.findByText('Bukti dari tautan publik')).toBeInTheDocument();
     expect(screen.getByText(/Repository publik berisi proyek Node\.js\./)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Verifikasi tautan' }));
-
-    // The price and the credit movement are shown before anything is spent.
-    const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent(
-      'Verifikasi kandidat ini akan menggunakan 2 kredit. Lanjutkan?',
-    );
-    expect(dialog).toHaveTextContent('Kredit sebelum');
-    expect(dialog).toHaveTextContent('Kredit sesudah');
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
-
-    await user.click(screen.getByRole('button', { name: 'Lanjutkan' }));
-
-    expect(
-      await screen.findByText(/Status verifikasi: SUPPORTED \(2 kredit\)\./),
-    ).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/verification'))).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Verifikasi tautan' })).not.toBeInTheDocument();
   });
 
-  it('shows the per-candidate price and the balance before any verification is started', async () => {
+  it('shows the price and the balance before the link check is started', async () => {
     respondWith();
     renderJobPage();
 
@@ -495,35 +476,97 @@ describe('ScreeningJobPage', () => {
     expect(
       await screen.findByText('2 kandidat belum diverifikasi · total 4 kredit'),
     ).toBeInTheDocument();
-    // Individual verification stays available alongside the new bulk action.
-    expect(screen.getAllByRole('button', { name: 'Verifikasi tautan' })).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Verifikasi semua' })).toBeEnabled();
   });
 
-  it('lets the user cancel an individual confirmation without spending credits', async () => {
-    const user = userEvent.setup();
-    respondWith();
-    renderJobPage();
+  describe('a batch that was uploaded but not started', () => {
+    const WAITING_JOB = {
+      ...JOB_DETAIL,
+      state: 'CREATED',
+      completedCandidates: 0,
+      queuedCandidates: 2,
+      creditsCharged: 0,
+      startedAt: null,
+      completedAt: null,
+    };
+    const WAITING_CANDIDATES = [
+      {
+        ...CANDIDATE_ANDI,
+        processingStatus: 'QUEUED',
+        score: null,
+        eligibilityStatus: null,
+        criteriaResults: [],
+      },
+    ];
 
-    await screen.findByText(/#1 Andi Pratama/);
-    const [firstVerifyButton] = screen.getAllByRole('button', { name: 'Verifikasi tautan' });
-    await user.click(firstVerifyButton as HTMLElement);
+    function startCalls() {
+      return fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).includes('/jobs/job-1/start') && init?.method === 'POST',
+      );
+    }
 
-    expect(await screen.findByRole('dialog')).toHaveTextContent(
-      'Verifikasi kandidat ini akan menggunakan 2 kredit. Lanjutkan?',
-    );
+    it('lists the CVs and runs nothing until the recruiter confirms', async () => {
+      const user = userEvent.setup();
+      respondWith({ job: WAITING_JOB, candidates: WAITING_CANDIDATES });
+      renderJobPage();
 
-    await user.click(screen.getByRole('button', { name: 'Batal' }));
+      expect(await screen.findByText(/#1 Andi Pratama/)).toBeInTheDocument();
+      expect(screen.getByText(/menunggu verifikasi/)).toBeInTheDocument();
+      expect(screen.getByText(/2 CV siap/)).toBeInTheDocument();
+      expect(await screen.findByText('Penilaian CV: 1 kredit/CV')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Ekspor CSV' })).toBeDisabled();
+      expect(startCalls()).toHaveLength(0);
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some(
-        ([url, init]) => String(url).includes('/verification') && init?.method === 'POST',
-      ),
-    ).toBe(false);
+      await user.click(screen.getByRole('button', { name: 'Verifikasi semua' }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog).toHaveTextContent('2 CV akan dinilai oleh AI');
+      expect(dialog).toHaveTextContent('Total: 2 kredit');
+      expect(startCalls()).toHaveLength(0);
+
+      await user.click(screen.getByRole('button', { name: 'Lanjutkan' }));
+
+      await waitFor(() => {
+        expect(startCalls()).toHaveLength(1);
+      });
+      // The link check belongs to the next step, not to this press.
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes('/jobs/job-1/verification') && init?.method === 'POST',
+        ),
+      ).toBe(false);
+    });
+
+    it('does not start when the recruiter cancels the confirmation', async () => {
+      const user = userEvent.setup();
+      respondWith({ job: WAITING_JOB, candidates: WAITING_CANDIDATES });
+      renderJobPage();
+
+      await screen.findByText('Penilaian CV: 1 kredit/CV');
+      await user.click(screen.getByRole('button', { name: 'Verifikasi semua' }));
+      await user.click(await screen.findByRole('button', { name: 'Batal' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(startCalls()).toHaveLength(0);
+    });
+
+    it('blocks the start and explains why when the balance is too low', async () => {
+      respondWith({
+        job: WAITING_JOB,
+        candidates: WAITING_CANDIDATES,
+        wallet: { available: 1, balance: 1 },
+      });
+      renderJobPage();
+
+      expect(
+        await screen.findByText(/Kredit tidak cukup: butuh 2 kredit, tersedia 1 kredit\./),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Verifikasi semua' })).toBeDisabled();
+    });
   });
 
-  it('blocks both verification actions and explains why when the balance is insufficient', async () => {
+  it('blocks the bulk link check and explains why when the balance is insufficient', async () => {
     respondWith({
       wallet: { available: 0, balance: 0 },
       estimate: {
@@ -540,9 +583,6 @@ describe('ScreeningJobPage', () => {
       await screen.findByText(/Kredit tidak cukup: butuh 4 kredit, tersedia 0 kredit\./),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Verifikasi semua' })).toBeDisabled();
-    for (const button of screen.getAllByRole('button', { name: 'Verifikasi tautan' })) {
-      expect(button).toBeDisabled();
-    }
   });
 
   it('verifies all eligible candidates in one confirmed action and refreshes the wallet', async () => {
@@ -562,7 +602,7 @@ describe('ScreeningJobPage', () => {
     expect(dialog).toHaveTextContent('Biaya: 2 kredit/kandidat');
     expect(dialog).toHaveTextContent('Total: 4 kredit');
     expect(dialog).toHaveTextContent(
-      'Verifikasi 2 kandidat akan menggunakan total 4 kredit. Lanjutkan?',
+      'Verifikasi tautan 2 kandidat akan menggunakan total 4 kredit. Lanjutkan?',
     );
 
     await user.click(screen.getByRole('button', { name: 'Lanjutkan' }));

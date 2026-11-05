@@ -43,6 +43,11 @@ test.describe('screening batch', () => {
     });
     await page.getByRole('button', { name: /Unggah/ }).click();
 
+    // Uploading only builds the list; the recruiter starts the batch explicitly.
+    await expect(page.getByText('#1 andi')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Verifikasi semua' }).click();
+    await page.getByRole('button', { name: 'Lanjutkan' }).click();
+
     // The mock provider reports the requirement as found, so the result is scored. The candidate
     // label is derived from the uploaded file name (`andi.pdf`), hence lowercase.
     await expect(page.getByText('#1 andi')).toBeVisible({ timeout: 30_000 });
@@ -75,6 +80,11 @@ test.describe('screening batch', () => {
       buffer: buildTextPdf(CV_LINES),
     });
     await page.getByRole('button', { name: /Unggah/ }).click();
+
+    // Uploading only builds the list; the recruiter starts the batch explicitly.
+    await expect(page.getByText('#1 andi')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Verifikasi semua' }).click();
+    await page.getByRole('button', { name: 'Lanjutkan' }).click();
 
     // Nothing in the CV mentions a driving licence, so the single criterion is NOT_FOUND: the
     // candidate scores 0 and stays in the results with the reason, never hidden.

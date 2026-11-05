@@ -114,6 +114,11 @@ describe('screening queue flow', () => {
     }
     const response = await call;
     expect(response.status, JSON.stringify(response.body)).toBe(201);
+
+    const started = await request(app)
+      .post(`/api/screening/jobs/${jobId}/start`)
+      .set(bearer(session));
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
   }
 
   function candidatesOf(jobId: string) {
@@ -143,6 +148,16 @@ describe('screening queue flow', () => {
     const job = await ctx.prisma.screeningJob.findUnique({ where: { id: jobId } });
     expect(job?.state).toBe('COMPLETED');
     expect(job?.creditsCharged).toBe(unitCredits * 3);
+    expect(job?.completedCandidates).toBe(3);
+
+    // The list behind the dashboard reports the finished candidates.
+    const list = await request(app).get('/api/screening/jobs').set(bearer(session));
+    expect(list.body.data.items[0]).toMatchObject({
+      id: jobId,
+      totalCandidates: 3,
+      completedCandidates: 3,
+      failedCandidates: 0,
+    });
     expect(job?.creditsReserved).toBe(0);
     expect(job?.completedAt).not.toBeNull();
 

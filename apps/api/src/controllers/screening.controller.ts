@@ -106,8 +106,8 @@ export async function getProgress(req: Request, res: Response): Promise<void> {
  * POST /api/screening/jobs/:jobId/candidates
  *
  * Uploads a batch of up to 50 PDFs, or one ZIP, as multipart field `files`. Individual
- * files that fail validation come back in `rejected`; the accepted ones are stored as
- * `QUEUED` and their credits are reserved.
+ * files that fail validation come back in `rejected`; the accepted ones are listed but
+ * neither processed nor charged until the job is started.
  */
 export async function uploadCandidates(req: Request, res: Response): Promise<void> {
   const auth = currentAuth(req);
@@ -120,6 +120,15 @@ export async function uploadCandidates(req: Request, res: Response): Promise<voi
 
   const batch = await screeningBatchService.uploadCandidates(auth.userId, jobId, files);
   res.status(201).json({ data: { batch } });
+}
+
+/** POST /api/screening/jobs/:jobId/start - reserves the credits and queues the uploaded batch. */
+export async function startJob(req: Request, res: Response): Promise<void> {
+  const auth = currentAuth(req);
+  const { jobId } = validatedParams<{ jobId: string }>(req);
+
+  const job = await screeningBatchService.startProcessing(auth.userId, jobId);
+  res.status(201).json({ data: { job } });
 }
 
 /** GET /api/screening/jobs/:jobId/candidates - the uploaded batch, oldest first. */

@@ -1607,6 +1607,19 @@ dev:worker` plus one uploaded batch is enough.
     driver otherwise; `npm run dev:worker`/`start:worker` now consumes both screening and CV jobs.
     Migration `20261105000000_async_cv_processing` adds `cv_audit_jobs`, its status/mode enums and
     a unique `cv_analyses.audit_job_id` for idempotent retry delivery.
+71. **Screening runs only when the recruiter starts it** (2026-11-05, changed by owner request).
+    Upload now stores the list and leaves the job `CREATED`; `POST /screening/jobs/:jobId/start`
+    holds the credits and queues the batch. No schema change: `CREATED` with `totalCandidates > 0`
+    means uploaded and waiting. **Verifikasi semua** is one button with two steps: it starts the
+    scoring first, and once candidates are completed it runs the bulk link check. The per-candidate
+    link button was removed from the web app; its API route remains. The job and results queries now
+    poll while a batch runs, which also fixes results staying stale after processing finished.
+72. **Screening counters and reports** (2026-11-05, fixed). Nothing ever wrote
+    `completed_candidates`/`failed_candidates`, so finished batches showed 0. `finalizeJob` now
+    stores them and job summaries read live candidate counts; rows finalised earlier keep 0 in the
+    admin list. The report PDF gained a summary and ranking table and uses screen labels. The CSV is
+    one row per candidate with a status and quote column per criterion, and neutralises spreadsheet
+    formulas from CV text.
 
 ---
 

@@ -95,8 +95,7 @@ describe('candidate verification API', () => {
    *
    * Verification eligibility requires a finished extraction, and this suite exercises the
    * verification endpoints rather than the queue, so the state is set directly instead of
-   * running a worker. The upload's per-CV reservation stays `ACTIVE` (no worker settles it),
-   * which the balance assertions account for through the wallet's `available` field.
+   * running a worker. The batch is never started, so no screening hold touches the wallet.
    */
   async function uploadAndComplete(
     jobId: string,
@@ -311,7 +310,7 @@ describe('candidate verification API', () => {
 
   it('refuses an unaffordable bulk request without reserving or verifying anything', async () => {
     const jobId = await createJob();
-    // Five credits: three are held by the batch reservation, leaving two for a batch that needs six.
+    // Five credits for a batch that needs six.
     await grantCredits(5);
     await uploadAndComplete(jobId, [
       { name: 'andi.pdf', lines: cv('andi') },
@@ -324,7 +323,7 @@ describe('candidate verification API', () => {
       eligibleCount: 3,
       totalCredits: 6,
       sufficient: false,
-      shortfall: 4,
+      shortfall: 1,
     });
 
     const response = await postBulk(jobId);

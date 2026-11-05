@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import {
   keepPreviousData,
   useMutation,
@@ -17,16 +19,15 @@ import {
   screeningReportResponseSchema,
   screeningResultPayloadResponseSchema,
   screeningVerificationEstimateResponseSchema,
-  candidateVerificationResponseSchema,
   type BulkVerificationResult,
   type CreateScreeningJobRequest,
   type ReportFormat,
   type ScreeningBatchUploadResult,
   type ScreeningJobDetail,
+  type ScreeningJobState,
   type ScreeningJobSummary,
   type ScreeningReportResult,
   type ScreeningVerificationEstimate,
-  type CandidateVerificationResult,
 } from '@aseb/shared';
 
 import { apiRequest, apiUploadMany } from './api.js';
@@ -38,6 +39,14 @@ import { useAuth } from './auth.js';
  * Everything the recruiter sees comes from the API's stored results: the web app never
  * computes a score, it renders what the deterministic engine already decided.
  */
+
+const POLL_INTERVAL_MS = 3_000;
+const RUNNING_STATES: readonly ScreeningJobState[] = ['VALIDATING', 'QUEUED', 'PROCESSING'];
+
+/** A batch that was started and has not finished yet: its stored data is still changing. */
+export function isScreeningRunning(state: ScreeningJobState | undefined): boolean {
+  return state !== undefined && RUNNING_STATES.includes(state);
+}
 
 export function useScreeningJobsQuery(page = 1, pageSize = 20) {
   const { token, status } = useAuth();
@@ -60,6 +69,8 @@ export function useScreeningJobQuery(jobId: string | undefined) {
   return useQuery({
     queryKey: ['screening', 'job', jobId, token],
     enabled: status === 'signed-in' && token !== null && Boolean(jobId),
+    refetchInterval: (query) =>
+      isScreeningRunning(query.state.data?.job.state) ? POLL_INTERVAL_MS : false,
     queryFn: () =>
       apiRequest(`/api/screening/jobs/${jobId as string}`, {
         token,
@@ -78,7 +89,7 @@ export function useScreeningProgressQuery(job: ScreeningJobDetail | undefined) {
   return useQuery({
     queryKey: ['screening', 'progress', job?.id, token],
     enabled: status === 'signed-in' && token !== null && Boolean(job?.id),
-    refetchInterval: finished ? false : 3_000,
+    refetchInterval: finished ? false : POLL_INTERVAL_MS,
     queryFn: () =>
       apiRequest(`/api/screening/jobs/${job?.id as string}/progress`, {
         token,
@@ -87,12 +98,17 @@ export function useScreeningProgressQuery(job: ScreeningJobDetail | undefined) {
   });
 }
 
-export function useScreeningResultsQuery(jobId: string | undefined, enabled = true) {
+export function useScreeningResultsQuery(
+  jobId: string | undefined,
+  enabled = true,
+  polling = false,
+) {
   const { token, status } = useAuth();
 
   return useQuery({
     queryKey: ['screening', 'results', jobId, token],
     enabled: enabled && status === 'signed-in' && token !== null && Boolean(jobId),
+    refetchInterval: polling ? POLL_INTERVAL_MS : false,
     queryFn: () =>
       apiRequest(`/api/screening/jobs/${jobId as string}/results`, {
         token,
@@ -154,6 +170,44 @@ export function useUploadCandidatesMutation(jobId: string) {
       void queryClient.invalidateQueries({ queryKey: ['screening'] });
     },
   });
+}
+
+/** Reserves the credits and queues the uploaded batch. The API refuses a repeated start. */
+export function useStartScreeningMutation(jobId: string) {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation<ScreeningJobDetail, Error, void>({
+    mutationFn: async () => {
+      const response = await apiRequest(`/api/screening/jobs/${jobId}/start`, {
+        method: 'POST',
+        token,
+        schema: screeningJobResponseSchema,
+      });
+      return response.job;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['screening'] });
+      void queryClient.invalidateQueries({ queryKey: ['credits', 'wallet'] });
+    },
+  });
+}
+
+/** A finished batch settles its hold and unlocks link checks, so those views must catch up. */
+export function useRefreshWhenScreeningFinishes(jobId: string | undefined, running: boolean) {
+  const queryClient = useQueryClient();
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    if (wasRunning.current && !running) {
+      void queryClient.invalidateQueries({ queryKey: ['screening', 'results', jobId] });
+      void queryClient.invalidateQueries({
+        queryKey: ['screening', 'verification-estimate', jobId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['credits', 'wallet'] });
+    }
+    wasRunning.current = running;
+  }, [jobId, queryClient, running]);
 }
 
 export function useCancelScreeningJobMutation(jobId: string) {
@@ -221,29 +275,6 @@ function invalidateAfterVerification(queryClient: QueryClient, jobId: string): v
   void queryClient.invalidateQueries({ queryKey: ['screening', 'results', jobId] });
   void queryClient.invalidateQueries({ queryKey: ['screening', 'verification-estimate', jobId] });
   void queryClient.invalidateQueries({ queryKey: ['credits', 'wallet'] });
-}
-
-/** Checks the links a CV contains; billed once per candidate when a page was fetched. */
-export function useVerifyCandidateEvidenceMutation(jobId: string) {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-
-  return useMutation<CandidateVerificationResult, Error, string>({
-    mutationFn: async (candidateId) => {
-      const response = await apiRequest(
-        `/api/screening/jobs/${jobId}/candidates/${candidateId}/verification`,
-        {
-          method: 'POST',
-          token,
-          schema: candidateVerificationResponseSchema,
-        },
-      );
-      return response.verification;
-    },
-    onSuccess: () => {
-      invalidateAfterVerification(queryClient, jobId);
-    },
-  });
 }
 
 /**

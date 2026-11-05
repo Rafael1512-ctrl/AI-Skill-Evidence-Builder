@@ -6,7 +6,6 @@ import {
   formatDateTimeId,
   type BulkVerificationResult,
   type CandidateResult,
-  type CandidateVerificationResult,
   type CriterionResult,
   type EligibilityStatus,
   type EvidenceStatus,
@@ -23,10 +22,12 @@ import {
   useUploadCandidatesMutation,
   useCancelScreeningJobMutation,
   useExportScreeningReportMutation,
+  useRefreshWhenScreeningFinishes,
+  useStartScreeningMutation,
   useVerificationEstimateQuery,
-  useVerifyCandidateEvidenceMutation,
   useVerifyAllCandidatesMutation,
   downloadBase64Report,
+  isScreeningRunning,
 } from '../lib/screening.js';
 import { ScreeningStateBadge } from './ScreeningPage.js';
 
@@ -50,15 +51,8 @@ const STATUS_LABELS: Record<EvidenceStatus, string> = {
   UNCERTAIN: 'Perlu ditinjau',
 };
 
-/** Which verification the confirmation dialog is currently asking about. */
-type VerificationTarget =
-  { kind: 'single'; candidateId: string; candidateName: string } | { kind: 'bulk' };
-
-/** One line describing what an individual verification did, shown in the notice area. */
-function individualVerificationNotice(verification: CandidateVerificationResult): string {
-  if (verification.disabled) return 'Verifikasi bukti sedang dinonaktifkan.';
-  return `Status verifikasi: ${verification.verificationStatus} (${verification.creditsCharged} kredit).`;
-}
+/** Which step the confirmation dialog is asking about: scoring the batch, or checking links. */
+type ConfirmationTarget = 'start' | 'links';
 
 /** One line summarising a bulk run: how many of the eligible candidates were actually billed. */
 function bulkVerificationNotice(result: BulkVerificationResult): string {
@@ -143,15 +137,11 @@ function CriterionRow({ criterion }: { criterion: CriterionResult }) {
 function CandidateCard({
   candidate,
   rank,
-  onVerify,
-  verifying,
-  verifyDisabled,
+  awaitingStart,
 }: {
   candidate: CandidateResult;
   rank: number;
-  onVerify: () => void;
-  verifying: boolean;
-  verifyDisabled: boolean;
+  awaitingStart: boolean;
 }) {
   const rating = candidate.score === null ? 'belum dinilai' : `${candidate.score}/100`;
   const externalEvidence = [...candidate.githubEvidence, ...candidate.portfolioEvidence];
@@ -164,21 +154,15 @@ function CandidateCard({
             #{rank} {candidate.candidateName}
           </span>
           <span className="text-xs text-[var(--color-content-muted)]">
-            {candidate.fileName} · {candidate.processingStatus} · verifikasi{' '}
-            {candidate.verificationStatus}
+            {candidate.fileName} ·{' '}
+            {awaitingStart
+              ? 'menunggu verifikasi'
+              : `${candidate.processingStatus} · verifikasi ${candidate.verificationStatus}`}
           </span>
         </div>
         <div className="flex items-center gap-3">
           <span className="font-semibold">{rating}</span>
           <EligibilityBadge status={candidate.eligibilityStatus} />
-          <button
-            type="button"
-            className="rounded-lg border border-[var(--color-border-subtle)] px-2 py-1 text-xs font-medium disabled:opacity-60"
-            disabled={verifying || verifyDisabled}
-            onClick={onVerify}
-          >
-            {verifying ? 'Memeriksa…' : 'Verifikasi tautan'}
-          </button>
         </div>
       </div>
 
@@ -245,15 +229,18 @@ export function ScreeningJobPage() {
   const job = useScreeningJobQuery(jobId);
   const detail = job.data?.job;
   const progress = useScreeningProgressQuery(detail);
+  const running = isScreeningRunning(detail?.state);
   const results = useScreeningResultsQuery(
     jobId,
     Boolean(detail) && (detail?.totalCandidates ?? 0) > 0,
+    running,
   );
+  useRefreshWhenScreeningFinishes(jobId, running);
   const reports = useScreeningReportsQuery(jobId);
   const upload = useUploadCandidatesMutation(jobId ?? '');
   const cancel = useCancelScreeningJobMutation(jobId ?? '');
   const exportReport = useExportScreeningReportMutation(jobId ?? '');
-  const verifyEvidence = useVerifyCandidateEvidenceMutation(jobId ?? '');
+  const start = useStartScreeningMutation(jobId ?? '');
   const verifyAll = useVerifyAllCandidatesMutation(jobId ?? '');
   const pricing = usePricingQuery();
   const wallet = useWalletQuery();
@@ -264,7 +251,7 @@ export function ScreeningJobPage() {
 
   const [files, setFiles] = useState<File[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-  const [verificationTarget, setVerificationTarget] = useState<VerificationTarget | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationTarget | null>(null);
 
   if (job.isPending) {
     return <div className="max-w-4xl text-sm">Memuat sesi…</div>;
@@ -282,12 +269,22 @@ export function ScreeningJobPage() {
 
   const finished = TERMINAL.includes(detail.state);
   const batch = upload.data;
+  // Uploaded but not started: the list is visible, nothing has run and no credit is held.
+  const awaitingStart = detail.state === 'CREATED' && detail.totalCandidates > 0;
 
   // The price is read from the centralized pricing service (admin overrides included), never
   // duplicated here. `available` drops the credits already held by an active reservation.
   const unitCredits =
     pricing.data?.find((item) => item.feature === 'EVIDENCE_VERIFICATION')?.credits ?? null;
+  const screeningUnitCredits =
+    pricing.data?.find((item) => item.feature === 'HRD_SCREEN_PER_CV')?.credits ?? null;
+  const screeningTotalCredits =
+    screeningUnitCredits === null ? null : screeningUnitCredits * detail.totalCandidates;
   const availableCredits = wallet.data?.available ?? null;
+  const insufficientToStart =
+    screeningTotalCredits !== null &&
+    availableCredits !== null &&
+    availableCredits < screeningTotalCredits;
   const estimate = verificationEstimate.data;
   const insufficientForOne =
     unitCredits !== null && availableCredits !== null && availableCredits < unitCredits;
@@ -296,8 +293,9 @@ export function ScreeningJobPage() {
     estimate.disabled ||
     estimate.eligibleCount === 0 ||
     !estimate.sufficient;
-  // The preflight price is authoritative; the price list only fills the gap before it loads.
-  const singleUnitCredits = unitCredits ?? estimate?.unitCredits ?? 0;
+  const verifyAllDisabled = awaitingStart
+    ? screeningTotalCredits === null || insufficientToStart || start.isPending
+    : bulkBlocked || verifyAll.isPending || detail.totalCandidates === 0;
 
   async function handleExport(format: 'CSV' | 'PDF'): Promise<void> {
     setNotice(null);
@@ -311,30 +309,27 @@ export function ScreeningJobPage() {
   }
 
   function confirmVerification(): void {
-    const target = verificationTarget;
-    if (!target) return;
-
-    if (target.kind === 'bulk') {
-      verifyAll.mutate(undefined, {
-        onSuccess: (result) => {
-          setVerificationTarget(null);
-          setNotice(bulkVerificationNotice(result));
+    if (confirmation === 'start') {
+      start.mutate(undefined, {
+        onSuccess: () => {
+          setConfirmation(null);
+          setNotice('Verifikasi dimulai. Hasil akan muncul di daftar kandidat.');
         },
         onError: (error) => {
-          setVerificationTarget(null);
+          setConfirmation(null);
           setNotice(error.message);
         },
       });
       return;
     }
 
-    verifyEvidence.mutate(target.candidateId, {
-      onSuccess: (verification) => {
-        setVerificationTarget(null);
-        setNotice(individualVerificationNotice(verification));
+    verifyAll.mutate(undefined, {
+      onSuccess: (result) => {
+        setConfirmation(null);
+        setNotice(bulkVerificationNotice(result));
       },
       onError: (error) => {
-        setVerificationTarget(null);
+        setConfirmation(null);
         setNotice(error.message);
       },
     });
@@ -359,7 +354,11 @@ export function ScreeningJobPage() {
 
       <section className="rounded-[var(--radius-card)] border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-5">
         <h2 className="font-medium">Progres</h2>
-        {progress.data ? (
+        {awaitingStart ? (
+          <p className="mt-2 text-sm text-[var(--color-content-muted)]">
+            {detail.totalCandidates} CV siap. Tekan Verifikasi semua untuk mulai menilai kandidat.
+          </p>
+        ) : progress.data ? (
           <>
             <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--color-border-subtle)]">
               <div
@@ -429,15 +428,15 @@ export function ScreeningJobPage() {
             <button
               type="button"
               className="rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-              disabled={bulkBlocked || verifyAll.isPending || detail.totalCandidates === 0}
-              onClick={() => setVerificationTarget({ kind: 'bulk' })}
+              disabled={verifyAllDisabled}
+              onClick={() => setConfirmation(awaitingStart ? 'start' : 'links')}
             >
-              {verifyAll.isPending ? 'Memverifikasi…' : 'Verifikasi semua'}
+              {verifyAll.isPending || start.isPending ? 'Memverifikasi…' : 'Verifikasi semua'}
             </button>
             <button
               type="button"
               className="rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-              disabled={exportReport.isPending || detail.totalCandidates === 0}
+              disabled={exportReport.isPending || detail.totalCandidates === 0 || awaitingStart}
               onClick={() => void handleExport('CSV')}
             >
               Ekspor CSV
@@ -445,7 +444,7 @@ export function ScreeningJobPage() {
             <button
               type="button"
               className="rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-              disabled={exportReport.isPending || detail.totalCandidates === 0}
+              disabled={exportReport.isPending || detail.totalCandidates === 0 || awaitingStart}
               onClick={() => void handleExport('PDF')}
             >
               Ekspor PDF
@@ -463,7 +462,24 @@ export function ScreeningJobPage() {
           </div>
         </div>
 
-        {unitCredits !== null ? (
+        {awaitingStart && screeningTotalCredits !== null ? (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-content-muted)]">
+            <span>Penilaian CV: {screeningUnitCredits} kredit/CV</span>
+            {availableCredits !== null ? <span>Saldo: {availableCredits} kredit</span> : null}
+            <span>
+              {detail.totalCandidates} CV · total {screeningTotalCredits} kredit
+            </span>
+          </p>
+        ) : null}
+
+        {awaitingStart && insufficientToStart ? (
+          <p role="alert" className="text-sm text-red-600">
+            Kredit tidak cukup: butuh {screeningTotalCredits} kredit, tersedia {availableCredits}{' '}
+            kredit.
+          </p>
+        ) : null}
+
+        {!awaitingStart && unitCredits !== null ? (
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-content-muted)]">
             <span>Verifikasi tautan: {unitCredits} kredit/kandidat</span>
             {availableCredits !== null ? <span>Saldo: {availableCredits} kredit</span> : null}
@@ -476,7 +492,7 @@ export function ScreeningJobPage() {
           </p>
         ) : null}
 
-        {estimate && estimate.eligibleCount > 0 && !estimate.sufficient ? (
+        {!awaitingStart && estimate && estimate.eligibleCount > 0 && !estimate.sufficient ? (
           <p role="alert" className="text-sm text-red-600">
             Kredit tidak cukup: butuh {estimate.totalCredits} kredit, tersedia {estimate.available}{' '}
             kredit.
@@ -489,7 +505,9 @@ export function ScreeningJobPage() {
           </p>
         ) : null}
 
-        {insufficientForOne && (estimate === undefined || estimate.eligibleCount === 0) ? (
+        {!awaitingStart &&
+        insufficientForOne &&
+        (estimate === undefined || estimate.eligibleCount === 0) ? (
           <p role="alert" className="text-sm text-red-600">
             Kredit tidak cukup untuk verifikasi (butuh {unitCredits} kredit, tersedia{' '}
             {availableCredits} kredit).
@@ -518,17 +536,7 @@ export function ScreeningJobPage() {
                 key={candidate.candidateId}
                 candidate={candidate}
                 rank={index + 1}
-                verifying={
-                  verifyEvidence.isPending && verifyEvidence.variables === candidate.candidateId
-                }
-                verifyDisabled={insufficientForOne}
-                onVerify={() =>
-                  setVerificationTarget({
-                    kind: 'single',
-                    candidateId: candidate.candidateId,
-                    candidateName: candidate.candidateName,
-                  })
-                }
+                awaitingStart={awaitingStart}
               />
             ))}
           </ul>
@@ -554,40 +562,36 @@ export function ScreeningJobPage() {
         </section>
       ) : null}
 
-      {verificationTarget ? (
+      {confirmation ? (
         <ConfirmDialog
           open
-          title={
-            verificationTarget.kind === 'bulk'
-              ? 'Konfirmasi verifikasi semua'
-              : 'Konfirmasi verifikasi'
-          }
+          title={confirmation === 'start' ? 'Mulai verifikasi' : 'Konfirmasi verifikasi semua'}
           confirmLabel="Lanjutkan"
-          busy={verifyAll.isPending || verifyEvidence.isPending}
-          confirmDisabled={verificationTarget.kind === 'bulk' ? bulkBlocked : insufficientForOne}
-          onCancel={() => setVerificationTarget(null)}
+          busy={verifyAll.isPending || start.isPending}
+          confirmDisabled={confirmation === 'start' ? verifyAllDisabled : bulkBlocked}
+          onCancel={() => setConfirmation(null)}
           onConfirm={confirmVerification}
         >
-          {verificationTarget.kind === 'bulk' && estimate ? (
+          {confirmation === 'start' && screeningTotalCredits !== null ? (
+            <>
+              <p>{detail.totalCandidates} CV akan dinilai oleh AI</p>
+              <p>Biaya: {screeningUnitCredits} kredit/CV</p>
+              <p className="font-medium">Total: {screeningTotalCredits} kredit</p>
+              <p>CV yang gagal diproses tidak ditagihkan. Lanjutkan?</p>
+              <BalancePreview available={availableCredits} cost={screeningTotalCredits} />
+            </>
+          ) : null}
+
+          {confirmation === 'links' && estimate ? (
             <>
               <p>{estimate.eligibleCount} kandidat belum diverifikasi</p>
               <p>Biaya: {estimate.unitCredits} kredit/kandidat</p>
               <p className="font-medium">Total: {estimate.totalCredits} kredit</p>
               <p>
-                Verifikasi {estimate.eligibleCount} kandidat akan menggunakan total{' '}
+                Verifikasi tautan {estimate.eligibleCount} kandidat akan menggunakan total{' '}
                 {estimate.totalCredits} kredit. Lanjutkan?
               </p>
               <BalancePreview available={availableCredits} cost={estimate.totalCredits} />
-            </>
-          ) : null}
-
-          {verificationTarget.kind === 'single' ? (
-            <>
-              <p>Verifikasi kandidat ini akan menggunakan {singleUnitCredits} kredit. Lanjutkan?</p>
-              <p className="text-[var(--color-content-muted)]">
-                {verificationTarget.candidateName}
-              </p>
-              <BalancePreview available={availableCredits} cost={singleUnitCredits} />
             </>
           ) : null}
         </ConfirmDialog>

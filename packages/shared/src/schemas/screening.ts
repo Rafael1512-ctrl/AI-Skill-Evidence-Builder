@@ -307,7 +307,7 @@ export type ScreeningCandidateSummary = z.infer<typeof screeningCandidateSummary
  *
  * The batch itself is rejected as a whole (4xx) only when the archive or the request is
  * unusable; individual files that fail validation come back in `rejected` while the rest
- * are accepted and queued.
+ * are accepted. Accepted CVs wait for `POST .../start`, so the credit fields stay empty here.
  */
 export const screeningBatchUploadResultSchema = z.object({
   job: screeningJobSummarySchema,

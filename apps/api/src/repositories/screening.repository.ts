@@ -60,8 +60,6 @@ export interface CreateCandidateInput {
 export interface CreateCandidatesInput {
   jobId: string;
   candidates: readonly CreateCandidateInput[];
-  reservationId: string;
-  creditsReserved: number;
 }
 
 export type ScreeningCandidateSummarySource = Pick<
@@ -275,11 +273,11 @@ export class ScreeningRepository {
   }
 
   /**
-   * Stores an uploaded batch and moves its job into `QUEUED`.
+   * Stores an uploaded batch. The job stays `CREATED`: nothing runs and no credit is held
+   * until the recruiter starts it (`beginJob`).
    *
-   * Candidates, the job counters, the credit reservation link and the audit events are
-   * written in one transaction: a batch can never be half-recorded, and the job can never
-   * claim a reservation that does not exist.
+   * Candidates, the job counter and the audit events are written in one transaction, so a
+   * batch can never be half-recorded.
    */
   async createCandidatesForJob(
     input: CreateCandidatesInput,
@@ -306,27 +304,22 @@ export class ScreeningRepository {
           data: candidates.map((candidate) => ({
             jobId: input.jobId,
             type: 'CANDIDATE_QUEUED' satisfies ScreeningJobEventType,
-            message: `Kandidat "${candidate.candidateName}" masuk antrean.`,
+            message: `Kandidat "${candidate.candidateName}" diunggah.`,
             payload: toJson({ candidateId: candidate.id, fileName: candidate.fileName }),
           })),
         });
 
         await tx.screeningJob.update({
           where: { id: input.jobId },
-          data: {
-            state: 'QUEUED',
-            totalCandidates: { increment: candidates.length },
-            reservationId: input.reservationId,
-            creditsReserved: { increment: input.creditsReserved },
-          },
+          data: { totalCandidates: { increment: candidates.length } },
         });
 
         await tx.screeningJobEvent.create({
           data: {
             jobId: input.jobId,
             type: 'STATE_CHANGED' satisfies ScreeningJobEventType,
-            message: 'Batch kandidat diunggah dan masuk antrean.',
-            payload: toJson({ state: 'QUEUED', candidateCount: candidates.length }),
+            message: 'Batch kandidat diunggah dan menunggu dimulai.',
+            payload: toJson({ state: 'CREATED', candidateCount: candidates.length }),
           },
         });
 
@@ -455,6 +448,60 @@ export class ScreeningRepository {
   }
 
   /**
+   * Moves a batch from `CREATED` to `QUEUED` exactly once and links its credit hold, so a
+   * repeated start cannot hold credits twice for the same job.
+   */
+  async beginJob(input: {
+    jobId: string;
+    reservationId: string;
+    creditsReserved: number;
+  }): Promise<boolean> {
+    return getPrisma().$transaction(async (tx) => {
+      const updated = await tx.screeningJob.updateMany({
+        where: {
+          id: input.jobId,
+          state: 'CREATED',
+          reservationId: null,
+          totalCandidates: { gt: 0 },
+        },
+        data: {
+          state: 'QUEUED',
+          reservationId: input.reservationId,
+          creditsReserved: input.creditsReserved,
+        },
+      });
+      if (updated.count === 0) return false;
+
+      await tx.screeningJobEvent.create({
+        data: {
+          jobId: input.jobId,
+          type: 'STATE_CHANGED' satisfies ScreeningJobEventType,
+          message: 'Batch dimulai dan masuk antrean.',
+          payload: toJson({ state: 'QUEUED' }),
+        },
+      });
+      return true;
+    });
+  }
+
+  /** Undoes `beginJob` when the queue refused the batch, so the recruiter can start it again. */
+  async revertJobStart(jobId: string): Promise<void> {
+    await getPrisma().screeningJob.updateMany({
+      where: { id: jobId, state: 'QUEUED' },
+      data: { state: 'CREATED', reservationId: null, creditsReserved: 0 },
+    });
+  }
+
+  async listQueuedCandidateIds(jobId: string): Promise<string[]> {
+    const candidates = await getPrisma().screeningCandidate.findMany({
+      where: { jobId, state: 'QUEUED' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    return candidates.map((candidate) => candidate.id);
+  }
+
+  /**
    * Moves a job from QUEUED to PROCESSING exactly once, so `startedAt` reflects the moment
    * work really began even when many workers start candidates concurrently.
    */
@@ -497,6 +544,8 @@ export class ScreeningRepository {
           completedAt: input.completedAt,
           failureReason: input.failureReason,
           creditsCharged: input.creditsCharged,
+          completedCandidates: input.progress.completed ?? 0,
+          failedCandidates: input.progress.failed ?? 0,
           // Whatever was not charged is no longer held: the reservation is settled or released.
           creditsReserved: 0,
         },

@@ -118,7 +118,7 @@ export function HrdDashboardPage() {
         />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,2.6fr)_minmax(0,1fr)]">
         <article className="overflow-hidden rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-subtle)] px-5 py-4">
             <div>
@@ -162,7 +162,7 @@ export function HrdDashboardPage() {
           ) : null}
           {items.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] text-left text-sm">
+              <table className="w-full min-w-[640px] text-left text-sm xl:min-w-0">
                 <thead className="bg-[var(--color-surface-muted)] text-xs text-[var(--color-content-muted)] uppercase">
                   <tr>
                     <th className="px-5 py-3 font-medium">Posisi</th>

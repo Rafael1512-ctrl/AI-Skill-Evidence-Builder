@@ -22,6 +22,7 @@ import {
   listPreferenceVersions,
   listScreeningReports,
   savePreferences,
+  startJob,
   uploadCandidates,
   verifyCandidateEvidence,
   verifyCandidates,
@@ -96,6 +97,14 @@ screeningRouter.get(
   requireAuth(),
   validate({ params: screeningJobIdParamSchema, query: paginationQuerySchema }),
   listCandidates,
+);
+
+/** Uploading only builds the list; this explicit step reserves credits and runs the batch. */
+screeningRouter.post(
+  '/jobs/:jobId/start',
+  requireAuth(),
+  validate({ params: screeningJobIdParamSchema }),
+  startJob,
 );
 
 /** Results and reports. Rendering a report is a snapshot, not a re-scoring. */
