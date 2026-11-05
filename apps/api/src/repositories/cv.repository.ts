@@ -1,6 +1,8 @@
 import type {
   CvAnalysis,
   CvAnalysisKind,
+  CvAuditJob,
+  CvAuditJobStatus,
   CvDocument,
   CvDocumentKind,
   CvEnhancement,
@@ -23,6 +25,11 @@ export interface CreateDocumentInput {
 
 export type CvAnalysisWithFileName = CvAnalysis & {
   document: Pick<CvDocument, 'fileName'> | null;
+};
+
+export type CvAuditJobWithRelations = CvAuditJob & {
+  document: Pick<CvDocument, 'fileName' | 'textContent' | 'pageCount'> | null;
+  analysis: CvAnalysis | null;
 };
 
 export type CvEnhancementWithFileName = CvEnhancement & {
@@ -64,6 +71,7 @@ export class CvRepository {
   async createAnalysis(input: {
     documentId: string | null;
     userId: string | null;
+    auditJobId?: string | null;
     kind: CvAnalysisKind;
     provider: string;
     model: string;
@@ -73,6 +81,80 @@ export class CvRepository {
     creditsCharged: number;
   }): Promise<CvAnalysis> {
     return getPrisma().cvAnalysis.create({ data: input });
+  }
+
+  async createAuditJobWithDocument(input: {
+    userId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    pageCount: number;
+    textContent: string;
+    textHash: string;
+    mode: 'FREE' | 'PAID';
+    reservationId: string;
+    freeAuditsUsed: number;
+    paidAuditCredits: number;
+    resetsAt: Date;
+  }): Promise<{ document: CvDocument; auditJob: CvAuditJob }> {
+    return getPrisma().$transaction(async (tx) => {
+      const document = await tx.cvDocument.create({
+        data: {
+          userId: input.userId,
+          kind: 'ORIGINAL',
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          sizeBytes: input.sizeBytes,
+          pageCount: input.pageCount,
+          textContent: input.textContent,
+          textHash: input.textHash,
+        },
+      });
+      const auditJob = await tx.cvAuditJob.create({
+        data: {
+          userId: input.userId,
+          documentId: document.id,
+          mode: input.mode,
+          reservationId: input.reservationId,
+          freeAuditsUsed: input.freeAuditsUsed,
+          paidAuditCredits: input.paidAuditCredits,
+          resetsAt: input.resetsAt,
+        },
+      });
+      return { document, auditJob };
+    });
+  }
+
+  async findAuditJobWithRelations(id: string): Promise<CvAuditJobWithRelations | null> {
+    return getPrisma().cvAuditJob.findUnique({
+      where: { id },
+      include: {
+        document: { select: { fileName: true, textContent: true, pageCount: true } },
+        analysis: true,
+      },
+    });
+  }
+
+  async findAnalysisForAuditJob(auditJobId: string): Promise<CvAnalysis | null> {
+    return getPrisma().cvAnalysis.findUnique({ where: { auditJobId } });
+  }
+
+  async updateAuditJob(
+    id: string,
+    data: {
+      status?: CvAuditJobStatus;
+      creditsCharged?: number;
+      failureCode?: string | null;
+      failureReason?: string | null;
+      startedAt?: Date | null;
+      completedAt?: Date | null;
+    },
+  ): Promise<CvAuditJob> {
+    return getPrisma().cvAuditJob.update({ where: { id }, data });
+  }
+
+  async deleteAuditJob(id: string): Promise<void> {
+    await getPrisma().cvAuditJob.delete({ where: { id } });
   }
 
   async findAnalysis(id: string): Promise<CvAnalysis | null> {
@@ -115,7 +197,7 @@ export class CvRepository {
         templateKey: input.templateKey,
         reservationId: input.reservationId,
         promptVersion: input.promptVersion,
-        status: 'PROCESSING',
+        status: 'PENDING',
       },
     });
   }
@@ -137,6 +219,10 @@ export class CvRepository {
 
   async findEnhancement(id: string): Promise<CvEnhancement | null> {
     return getPrisma().cvEnhancement.findUnique({ where: { id } });
+  }
+
+  async deleteEnhancement(id: string): Promise<void> {
+    await getPrisma().cvEnhancement.delete({ where: { id } });
   }
 
   /** Reads the source through the relation so a deleted CV still has its file name. */

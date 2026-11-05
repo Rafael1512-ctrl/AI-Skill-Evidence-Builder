@@ -1,11 +1,18 @@
 import { createHash } from 'node:crypto';
 
-import { LIMITS, type CvAuditResponse, type CvAuditUsage, type FeatureKey } from '@aseb/shared';
+import {
+  LIMITS,
+  cvAuditResultSchema,
+  type CvAuditJob,
+  type CvAuditUsage,
+  type FeatureKey,
+} from '@aseb/shared';
 
-import { CvRepository } from '../repositories/cv.repository.js';
+import { getCvProcessingQueue } from '../queues/cv-processing.queue.js';
+import { CvRepository, type CvAuditJobWithRelations } from '../repositories/cv.repository.js';
 import { getAiProvider } from '../providers/ai/index.js';
 import { buildJobSeekerAuditPrompt } from '../prompts/jobSeeker/auditPrompt.js';
-import { AppError } from '../utils/errors.js';
+import { AppError, isAppError } from '../utils/errors.js';
 import { validatePdfUpload } from '../utils/file-validation.js';
 import { recordAiUsage } from './ai-usage.service.js';
 import { creditService, type CreditService } from './credit.service.js';
@@ -65,13 +72,26 @@ interface AuditGrant {
   window: AuditDayWindow;
 }
 
+function failureFor(error: unknown): { code: string; message: string } {
+  if (isAppError(error)) {
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: 'INTERNAL_ERROR',
+    message: 'Audit CV gagal diproses. Silakan coba lagi.',
+  };
+}
+
 /**
- * The free CV audit.
+ * The free CV audit is split across two phases:
  *
- * Authentication is mandatory. Each account gets five free audits per Jakarta calendar
- * day; later audits use the admin-editable `CV_DEEP_ANALYSIS` price. The first five are
- * tracked as zero-credit reservations so the quota has a durable, account-scoped audit
- * trail without inventing a second wallet or usage table.
+ * 1. `submit` validates/extracts the PDF, claims the daily quota and persists a durable
+ *    `CvAuditJob` before enqueueing it.
+ * 2. `processAudit` runs in the background worker, calls the provider, settles credits
+ *    and stores the analysis.
+ *
+ * A browser refresh can therefore reconnect to the same job through `getJob`; it no longer
+ * owns the only copy of the operation's progress.
  */
 export class CvAuditService {
   constructor(
@@ -112,8 +132,6 @@ export class CvAuditService {
     const usedBefore = await this.freeAuditsUsed(userId, window);
 
     if (usedBefore < LIMITS.FREE_CV_AUDITS_PER_DAY) {
-      // Claim a free slot before the expensive work starts. Counting after insertion means
-      // concurrent requests can never push the number of free slots above the daily limit.
       const reservation = await this.credits.reserve({
         userId,
         feature: FREE_AUDIT_FEATURE,
@@ -162,27 +180,127 @@ export class CvAuditService {
     };
   }
 
-  async audit(input: AuditCvInput): Promise<CvAuditResponse> {
+  private toJob(job: CvAuditJobWithRelations): CvAuditJob {
+    const analysis = job.analysis;
+    const result = analysis ? cvAuditResultSchema.parse(analysis.result) : null;
+
+    return {
+      auditId: job.id,
+      status: job.status,
+      analysisId: analysis?.id ?? null,
+      result,
+      billing: analysis
+        ? {
+            mode: job.mode,
+            creditsCharged: job.creditsCharged,
+            freeAuditsLimit: LIMITS.FREE_CV_AUDITS_PER_DAY,
+            freeAuditsUsed: job.freeAuditsUsed,
+            freeAuditsRemaining: Math.max(0, LIMITS.FREE_CV_AUDITS_PER_DAY - job.freeAuditsUsed),
+            resetsAt: job.resetsAt.toISOString(),
+            paidAuditCredits: job.paidAuditCredits,
+          }
+        : null,
+      failure:
+        job.status === 'FAILED'
+          ? {
+              code: job.failureCode ?? 'INTERNAL_ERROR',
+              message: job.failureReason ?? 'Audit CV gagal diproses.',
+            }
+          : null,
+      createdAt: job.createdAt.toISOString(),
+      startedAt: job.startedAt?.toISOString() ?? null,
+      completedAt: job.completedAt?.toISOString() ?? null,
+    };
+  }
+
+  /**
+   * Validates and persists an upload, then enqueues background AI processing.
+   * The HTTP request returns as soon as the queue accepts the durable job.
+   */
+  async submit(input: AuditCvInput): Promise<CvAuditJob> {
     const file = validatePdfUpload(input.file);
-    const userId = input.userId;
-    const grant = await this.claimQuota(userId);
-    let settled = false;
+    const extracted = await extractPdfTextOrThrow(file.buffer);
+    const grant = await this.claimQuota(input.userId);
+
+    let auditJobId: string | null = null;
+    try {
+      const { auditJob, document } = await this.repository.createAuditJobWithDocument({
+        userId: input.userId,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        pageCount: extracted.pageCount,
+        textContent: extracted.text,
+        textHash: hashText(extracted.text),
+        mode: grant.mode,
+        reservationId: grant.reservationId,
+        freeAuditsUsed: grant.freeAuditsUsed,
+        paidAuditCredits: grant.paidAuditCredits,
+        resetsAt: new Date(grant.window.resetsAt),
+      });
+      auditJobId = auditJob.id;
+
+      await getCvProcessingQueue().enqueue({ kind: 'AUDIT', id: auditJob.id });
+
+      return this.toJob({
+        ...auditJob,
+        document: {
+          fileName: document.fileName,
+          textContent: document.textContent,
+          pageCount: document.pageCount,
+        },
+        analysis: null,
+      });
+    } catch (error) {
+      await this.credits
+        .release(grant.reservationId, 'Audit CV gagal dimasukkan ke antrean')
+        .catch(() => undefined);
+      if (auditJobId) {
+        await this.repository.deleteAuditJob(auditJobId).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  /** Runs one queue attempt. Re-delivery after a completed job is a no-op. */
+  async processAudit(auditJobId: string, isFinalAttempt: boolean): Promise<void> {
+    const job = await this.repository.findAuditJobWithRelations(auditJobId);
+    if (!job || job.status === 'COMPLETED' || job.status === 'FAILED') return;
+
+    await this.repository.updateAuditJob(auditJobId, {
+      status: 'PROCESSING',
+      startedAt: job.startedAt ?? new Date(),
+      failureCode: null,
+      failureReason: null,
+    });
 
     try {
-      const extracted = await extractPdfTextOrThrow(file.buffer);
+      const existing = await this.repository.findAnalysisForAuditJob(auditJobId);
+      if (existing) {
+        await this.repository.updateAuditJob(auditJobId, {
+          status: 'COMPLETED',
+          creditsCharged: existing.creditsCharged,
+          completedAt: new Date(),
+        });
+        return;
+      }
+
+      const cvText = job.document?.textContent;
+      if (!cvText) {
+        throw AppError.textExtractionFailed({ auditJobId });
+      }
 
       const provider = getAiProvider();
-      // Prompts are composed by the prompt layer, never by the provider or the service.
-      const prompt = buildJobSeekerAuditPrompt({ cvText: extracted.text });
+      const prompt = buildJobSeekerAuditPrompt({ cvText });
       const analysis = await provider.analyzeCv({ prompt });
 
-      const result = {
+      const completeResult = {
         ...analysis.data,
         extraction: {
-          pageCount: extracted.pageCount,
-          charCount: extracted.charCount,
+          pageCount: job.document?.pageCount ?? 0,
+          charCount: cvText.length,
           detectedLanguage: null,
-          fileName: file.fileName,
+          fileName: job.document?.fileName ?? null,
         },
         ephemeral: false,
         analyzedAt: new Date().toISOString(),
@@ -192,88 +310,115 @@ export class CvAuditService {
       };
 
       const settlement = await this.credits.settle({
-        reservationId: grant.reservationId,
-        credits: grant.unitCredits,
+        reservationId: job.reservationId,
+        credits: job.mode === 'FREE' ? 0 : job.paidAuditCredits,
         description:
-          grant.mode === 'FREE'
+          job.mode === 'FREE'
             ? 'Audit CV gratis'
-            : `Audit CV tambahan (${grant.unitCredits} kredit)`,
-        idempotencyKey: `cv_audit:${grant.reservationId}`,
+            : `Audit CV tambahan (${job.paidAuditCredits} kredit)`,
+        idempotencyKey: `cv_audit:${job.reservationId}`,
       });
-      settled = true;
-
-      let documentId: string | null = null;
-      let auditId: string;
-      try {
-        const document = await this.repository.createDocument({
-          userId,
-          kind: 'ORIGINAL',
-          fileName: file.fileName,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-          pageCount: extracted.pageCount,
-          textContent: extracted.text,
-          textHash: hashText(extracted.text),
-        });
-        documentId = document.id;
-
-        const persisted = await this.repository.createAnalysis({
-          documentId: document.id,
-          userId,
-          kind: grant.mode === 'FREE' ? 'FREE_AUDIT' : 'DEEP_ANALYSIS',
-          provider: analysis.provider,
-          model: analysis.model,
-          promptVersion: analysis.promptVersion,
-          atsScore: analysis.data.atsScore,
-          result,
-          creditsCharged: settlement.charged,
-        });
-        auditId = persisted.id;
-      } catch (error) {
-        if (documentId) {
-          await this.repository.deleteDocument(documentId, userId).catch(() => undefined);
-        }
-        if (settlement.charged > 0) {
-          await this.credits
-            .refund({
-              userId,
-              credits: settlement.charged,
-              description: 'Refund Audit CV (hasil gagal disimpan)',
-              referenceType: 'cv_audit',
-              referenceId: grant.reservationId,
-              idempotencyKey: `cv_audit_refund:${grant.reservationId}`,
-            })
-            .catch(() => undefined);
-        }
-        throw error;
-      }
-
-      await recordAiUsage({
-        userId,
-        feature: grant.mode === 'FREE' ? FREE_AUDIT_FEATURE : PAID_AUDIT_FEATURE,
-        result: analysis,
+      await this.repository.updateAuditJob(auditJobId, {
         creditsCharged: settlement.charged,
       });
 
-      return {
-        auditId,
-        result,
-        billing: {
-          mode: grant.mode,
-          creditsCharged: settlement.charged,
-          freeAuditsLimit: LIMITS.FREE_CV_AUDITS_PER_DAY,
-          freeAuditsUsed: grant.freeAuditsUsed,
-          freeAuditsRemaining: LIMITS.FREE_CV_AUDITS_PER_DAY - grant.freeAuditsUsed,
-          resetsAt: grant.window.resetsAt,
-          paidAuditCredits: grant.paidAuditCredits,
-        },
-      };
-    } catch (error) {
-      if (!settled) {
-        await this.credits.release(grant.reservationId, 'Audit CV gagal').catch(() => undefined);
+      let persisted = await this.repository.findAnalysisForAuditJob(auditJobId);
+      if (!persisted) {
+        try {
+          persisted = await this.repository.createAnalysis({
+            auditJobId,
+            documentId: job.documentId,
+            userId: job.userId,
+            kind: job.mode === 'FREE' ? 'FREE_AUDIT' : 'DEEP_ANALYSIS',
+            provider: analysis.provider,
+            model: analysis.model,
+            promptVersion: analysis.promptVersion,
+            atsScore: analysis.data.atsScore,
+            result: completeResult,
+            creditsCharged: settlement.charged,
+          });
+          await recordAiUsage({
+            userId: job.userId,
+            feature: job.mode === 'FREE' ? FREE_AUDIT_FEATURE : PAID_AUDIT_FEATURE,
+            result: analysis,
+            creditsCharged: settlement.charged,
+          });
+        } catch (error) {
+          persisted = await this.repository.findAnalysisForAuditJob(auditJobId);
+          if (!persisted) throw error;
+        }
       }
+
+      await this.repository.updateAuditJob(auditJobId, {
+        status: 'COMPLETED',
+        creditsCharged: settlement.charged,
+        completedAt: new Date(),
+        failureCode: null,
+        failureReason: null,
+      });
+    } catch (error) {
+      const persisted = await this.repository.findAnalysisForAuditJob(auditJobId).catch(() => null);
+      if (persisted) {
+        await this.repository
+          .updateAuditJob(auditJobId, {
+            status: 'COMPLETED',
+            creditsCharged: persisted.creditsCharged,
+            completedAt: new Date(),
+            failureCode: null,
+            failureReason: null,
+          })
+          .catch(() => undefined);
+        return;
+      }
+
+      const failure = failureFor(error);
+      if (!isFinalAttempt) {
+        await this.repository
+          .updateAuditJob(auditJobId, {
+            status: 'QUEUED',
+            startedAt: null,
+            failureCode: failure.code,
+            failureReason: failure.message,
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+
+      const current = await this.repository.findAuditJobWithRelations(auditJobId);
+      if (current && current.creditsCharged > 0) {
+        await this.credits
+          .refund({
+            userId: current.userId,
+            credits: current.creditsCharged,
+            description: 'Refund Audit CV (pemrosesan gagal)',
+            referenceType: 'cv_audit',
+            referenceId: current.reservationId,
+            idempotencyKey: `cv_audit_refund:${current.reservationId}`,
+          })
+          .catch(() => undefined);
+      } else {
+        await this.credits.release(job.reservationId, 'Audit CV gagal').catch(() => undefined);
+      }
+
+      await this.repository
+        .updateAuditJob(auditJobId, {
+          status: 'FAILED',
+          failureCode: failure.code,
+          failureReason: failure.message,
+          completedAt: new Date(),
+        })
+        .catch(() => undefined);
       throw error;
     }
+  }
+
+  /** Owner-scoped status used by the polling UI and after a browser refresh. */
+  async getJob(auditJobId: string, userId: string): Promise<CvAuditJob> {
+    const job = await this.repository.findAuditJobWithRelations(auditJobId);
+    if (!job || job.userId !== userId) {
+      throw AppError.notFound('Audit CV tidak ditemukan.');
+    }
+    return this.toJob(job);
   }
 
   /** The audit for a stored document, used by the paid deep-analysis flow. */

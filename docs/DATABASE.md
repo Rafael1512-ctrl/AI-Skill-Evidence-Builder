@@ -50,7 +50,7 @@ Connection URLs:
 
 ## 2. Model map
 
-23 models, grouped by domain. Table name = PostgreSQL identifier.
+24 models, grouped by domain. Table name = PostgreSQL identifier.
 
 ### Identity
 
@@ -94,6 +94,7 @@ Payments:
 | Model           | Table             | Purpose                                                                                                          |
 | --------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `CvDocument`    | `cv_documents`    | Uploaded or generated CV. Stores metadata plus extracted plain text when the workflow is persistent.             |
+| `CvAuditJob`    | `cv_audit_jobs`   | Durable background audit state, quota mode and billing details; links the source document and final analysis.    |
 | `CvAnalysis`    | `cv_analyses`     | Validated free or paid audit result (`result` JSON), with score, credits charged and prompt version.             |
 | `CvEnhancement` | `cv_enhancements` | Paid enhancement: options, generated document JSON, template, status, credits, reservation link, prompt version. |
 
@@ -104,6 +105,10 @@ Key details:
   records; `is_ephemeral` is likewise retained for compatibility.
 - `deleted_at` plus clearing `text_content` is the deletion path used by
   `CvRepository.deleteDocument`.
+- `cv_audit_jobs` is written before the AI call. `status` moves `QUEUED -> PROCESSING ->
+COMPLETED|FAILED`; `reservation_id` is unique and `cv_analyses.audit_job_id` is unique, making
+  worker re-delivery idempotent. The job stores the resolved free/paid mode, quota window reset,
+  paid price and charge so status reads do not reconstruct billing from mutable pricing.
 - `cv_enhancements.source_document_id` links the uploaded CV; `result_document_id` links the
   generated PDF export record (`CvDocument.kind = ENHANCED`) once the user exports it, and is
   rewritten when they export again with another template (`ON DELETE SET NULL`, so history
@@ -360,7 +365,7 @@ Key details:
 
 ## 3. Enums
 
-20 PostgreSQL enums back the state machines so invalid states are rejected by the
+22 PostgreSQL enums back the state machines so invalid states are rejected by the
 database, not just by TypeScript.
 
 | Enum                    | Values                                                                                                                   |
@@ -370,6 +375,8 @@ database, not just by TypeScript.
 | `CvDocumentKind`        | `ORIGINAL`, `ENHANCED`                                                                                                   |
 | `CvAnalysisKind`        | `FREE_AUDIT`, `DEEP_ANALYSIS`                                                                                            |
 | `EnhancementStatus`     | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `REFUNDED`                                                               |
+| `CvAuditJobStatus`      | `QUEUED`, `PROCESSING`, `COMPLETED`, `FAILED`                                                                            |
+| `CvAuditMode`           | `FREE`, `PAID`                                                                                                           |
 | `ScreeningJobState`     | `CREATED`, `VALIDATING`, `QUEUED`, `PROCESSING`, `PARTIALLY_COMPLETED`, `COMPLETED`, `FAILED`, `CANCELLED`               |
 | `CandidateState`        | `QUEUED`, `PROCESSING`, `COMPLETED`, `FAILED`                                                                            |
 | `RequirementClass`      | `REQUIRED`, `PREFERRED`, `BONUS`                                                                                         |
@@ -518,7 +525,8 @@ queues, and idempotency lookups.
 | `payment_transactions(user_id, created_at)`, `(status)`, `(provider_transaction_id)`          | User payment history, reconciliation, status sweeps.     |
 | `payment_webhook_events(provider, received_at)`, `(processed)`                                | Replay audits and retry of unprocessed events.           |
 | `cv_documents(user_id, created_at)`, `(text_hash)`                                            | User document history; duplicate-text lookup.            |
-| `cv_analyses(user_id, created_at)`, `cv_enhancements(user_id, created_at)`, `(status)`        | History views and enhancement queues.                    |
+| `cv_analyses(user_id, created_at)`, `cv_audit_jobs(user_id, created_at)`, `(status)`          | History views and durable audit-job polling.             |
+| `cv_enhancements(user_id, created_at)`, `(status)`                                            | History views and enhancement queue polling.             |
 | `screening_jobs(user_id, created_at)`, `(state)`                                              | Recruiter history and the worker's job queue.            |
 | `screening_candidates(job_id, state)`, `(job_id, score)`                                      | Progress polling (`n / total`) and ranked result pages.  |
 | `evidence_items(candidate_id)`, `(criterion_result_id)`                                       | Evidence fetch per candidate/criterion.                  |
@@ -617,7 +625,7 @@ IDENTITY ... CASCADE`).
   adjustment, reporting lists).
 - `migrate-deploy.test.ts` boots a PostgreSQL-wire server, runs the actual
   `prisma migrate deploy` binary against it, and asserts the migration is applied and
-  recorded in `_prisma_migrations` (23 application tables + the history table). This
+  recorded in `_prisma_migrations` (24 application tables + the history table). This
   covers the deployment code path - migration checksums, the history table and
   `prisma.config.ts` URL wiring - not just the raw SQL.
 - Still unverified: a live Supabase instance (no credentials in this environment, and the

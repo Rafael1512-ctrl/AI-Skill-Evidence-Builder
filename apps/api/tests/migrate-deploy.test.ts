@@ -97,6 +97,7 @@ describe('prisma migrate deploy', () => {
     expect(result.stderr).not.toContain('P1001');
     expect(result.code, `deploy failed:\n${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain('20260926000000_init');
+    expect(result.stdout).toContain('20261105000000_async_cv_processing');
     expect(result.stdout).toContain('All migrations have been successfully applied');
   });
 
@@ -105,8 +106,16 @@ describe('prisma migrate deploy', () => {
       'select migration_name, finished_at is not null as applied from _prisma_migrations',
     );
 
-    expect(applied.rows).toHaveLength(1);
-    expect(applied.rows[0]).toMatchObject({ migration_name: '20260926000000_init', applied: true });
+    expect(applied.rows).toHaveLength(2);
+    expect(applied.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ migration_name: '20260926000000_init', applied: true }),
+        expect.objectContaining({
+          migration_name: '20261105000000_async_cv_processing',
+          applied: true,
+        }),
+      ]),
+    );
   });
 
   it('creates the expected tables in the target database', async () => {
@@ -114,14 +123,15 @@ describe('prisma migrate deploy', () => {
       `select count(*)::int as n from pg_tables where schemaname = 'public'`,
     );
 
-    // 23 application tables plus _prisma_migrations.
-    expect(tables.rows[0]?.n).toBe(24);
+    // 24 application tables plus _prisma_migrations.
+    expect(tables.rows[0]?.n).toBe(25);
 
     const spotCheck = await pglite.query<{ tablename: string }>(
-      `select tablename from pg_tables where schemaname = 'public' and tablename in ('users', 'credit_wallets', 'screening_jobs') order by tablename`,
+      `select tablename from pg_tables where schemaname = 'public' and tablename in ('users', 'credit_wallets', 'cv_audit_jobs', 'screening_jobs') order by tablename`,
     );
     expect(spotCheck.rows.map((row) => row.tablename)).toEqual([
       'credit_wallets',
+      'cv_audit_jobs',
       'screening_jobs',
       'users',
     ]);

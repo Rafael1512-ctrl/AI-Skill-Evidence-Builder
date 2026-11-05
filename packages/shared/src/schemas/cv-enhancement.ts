@@ -208,6 +208,8 @@ export const cvEnhancementDetailSchema = cvEnhancementRecordSchema.extend({
   fileName: z.string().nullable().default(null),
   originalText: z.string(),
   promptVersion: z.string().min(1).max(64),
+  /** Client-safe explanation when the worker could not produce a document. */
+  failureReason: z.string().nullable().default(null),
 });
 
 export type CvEnhancementDetail = z.infer<typeof cvEnhancementDetailSchema>;

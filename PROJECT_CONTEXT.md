@@ -27,6 +27,11 @@ account can open both `/dashboard/job-seeker` and `/dashboard/hrd` because role 
 choice, not an authorization role; both spend from the same credit wallet. The admin console has no
 visible navigation entry and remains reachable only by opening `/admin`, where the server still
 enforces `requireAdmin`. No API schema or database migration was needed (§8.65).
+Addendum 2026-11-05: CV audit and CV enhancement are now asynchronous. Uploads validate/extract the
+PDF and persist a durable job before returning `202`; AI processing, credit settlement and result
+storage run through the new `cv-processing` queue/worker. The audit page and enhancement page keep
+the job id in the URL and poll status, so refreshing or reopening the tab resumes the same job
+(§8.71).
 
 **Workflow rule in force:** work phase by phase and stop at the end of every phase for explicit
 approval. Do not begin the next phase until the owner says `Lanjutkan Phase N`.
@@ -1568,7 +1573,7 @@ dev:worker` plus one uploaded batch is enough.
     activity table replaced its delete action with a Detail column that opens
     `/audit/history/:id` or `/enhance/history/:id`, and the HRD table renamed Aksi to Detail. The
     web delete hook and `apiRequestNoContent` were removed as unused. `DELETE
-    /api/cv/documents/:documentId` and its soft-delete behaviour remain in the API, so the web app
+/api/cv/documents/:documentId` and its soft-delete behaviour remain in the API, so the web app
     currently gives users no way to delete a stored CV.
 69. **Credits page inside the dashboard** (2026-11-05, changed by owner request). `CreditsRoute`
     renders `/credits` inside `DashboardShell` for signed-in accounts and as a plain public page for
@@ -1581,6 +1586,18 @@ dev:worker` plus one uploaded batch is enough.
     LinkedIn, GitHub and portfolio fields from the saved profile. Those fields are sent as links
     supplied in the request, independently of `useProfileContext`, so the consent text now names
     only the name, headline and location and tells the user to clear a link they do not want used.
+71. **CV audit and enhancement run as durable background jobs** (2026-11-05, owner request). Both
+    upload endpoints still validate the PDF and extract its text at the HTTP boundary, so invalid,
+    scanned or unreadable files fail immediately without creating work. Once extraction succeeds,
+    `CvAuditJob` (or the existing `CvEnhancement` row) is committed with its quota/credit hold and
+    the request returns `202`; `cv-processing` then calls the AI provider, settles credits only on
+    success, stores the result and records AI usage. `GET /api/cv/audits/:auditId` and the existing
+    enhancement detail endpoint expose durable status. The UI writes `auditId` /
+    `enhancementId` into the URL and polls until a terminal state, so a refresh no longer owns the
+    only copy of progress. The queue uses BullMQ when `REDIS_URL` is set and the same in-process
+    driver otherwise; `npm run dev:worker`/`start:worker` now consumes both screening and CV jobs.
+    Migration `20261105000000_async_cv_processing` adds `cv_audit_jobs`, its status/mode enums and
+    a unique `cv_analyses.audit_job_id` for idempotent retry delivery.
 
 ---
 

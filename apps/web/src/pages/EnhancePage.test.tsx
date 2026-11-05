@@ -101,7 +101,9 @@ const ENHANCEMENT = {
     certifications: [],
     languages: [],
     additionalSections: [],
-    changeLog: [{ section: 'Pengalaman', changeType: 'REWORDED', description: 'Kalimat dirapikan.' }],
+    changeLog: [
+      { section: 'Pengalaman', changeType: 'REWORDED', description: 'Kalimat dirapikan.' },
+    ],
     missingInformation: [
       { section: 'Pengalaman', message: 'Angka pencapaian belum tersedia di CV.' },
     ],
@@ -113,6 +115,15 @@ const ENHANCEMENT = {
   completedAt: '2026-09-26T10:00:05.000Z',
   originalText: 'Budi Santoso\nSoftware Engineer\nPengalaman kerja lima tahun.',
   promptVersion: 'JOB_SEEKER_ENHANCE_V1',
+  failureReason: null,
+};
+
+const PENDING_ENHANCEMENT = {
+  ...ENHANCEMENT,
+  status: 'PENDING',
+  document: null,
+  creditsCharged: 0,
+  completedAt: null,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -125,11 +136,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const fetchMock = vi.fn();
 
-function renderEnhance() {
+function renderEnhance(initialEntry = '/enhance') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/enhance']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <AuthProvider>
           <EnhancePage />
         </AuthProvider>
@@ -181,8 +192,11 @@ describe('EnhancePage', () => {
         });
       }
       if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
+      if (url.startsWith('/api/cv/enhancements/')) {
+        return jsonResponse({ data: { enhancement: ENHANCEMENT } });
+      }
       submitted = init?.body as FormData;
-      return jsonResponse({ data: { enhancement: ENHANCEMENT } }, 201);
+      return jsonResponse({ data: { enhancement: PENDING_ENHANCEMENT } }, 202);
     });
 
     const { user } = renderEnhance();
@@ -243,7 +257,34 @@ describe('EnhancePage', () => {
     await user.click(screen.getByRole('button', { name: /sempurnakan cv/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/harus berupa pdf/i);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/cv/enhance'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/cv/enhance'))).toBe(
+      false,
+    );
+  });
+
+  it('resumes a background enhancement from the URL after a refresh', async () => {
+    window.localStorage.setItem('aseb.access-token', 'test-token');
+    fetchMock.mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith('/api/profile')) {
+        return jsonResponse({
+          data: {
+            profile: PROFILE,
+            googleLink: { supported: false, reason: null, method: null, redirectTo: null },
+          },
+        });
+      }
+      if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
+      if (url === '/api/cv/enhancements/enh-1') {
+        return jsonResponse({ data: { enhancement: ENHANCEMENT } });
+      }
+      return jsonResponse({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404);
+    });
+
+    renderEnhance('/enhance?enhancementId=enh-1');
+
+    expect(await screen.findByText(/sesudah — hasil penyempurnaan/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/cv/enhancements/enh-1', expect.anything());
   });
 
   describe('links saved on the profile', () => {
@@ -264,8 +305,11 @@ describe('EnhancePage', () => {
           });
         }
         if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
+        if (url.startsWith('/api/cv/enhancements/')) {
+          return jsonResponse({ data: { enhancement: ENHANCEMENT } });
+        }
         onSubmit(init?.body as FormData);
-        return jsonResponse({ data: { enhancement: ENHANCEMENT } }, 201);
+        return jsonResponse({ data: { enhancement: PENDING_ENHANCEMENT } }, 202);
       });
     }
 
@@ -338,8 +382,11 @@ describe('EnhancePage', () => {
         });
       }
       if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
+      if (url.startsWith('/api/cv/enhancements/')) {
+        return jsonResponse({ data: { enhancement: ENHANCEMENT } });
+      }
       submitted = init?.body as FormData;
-      return jsonResponse({ data: { enhancement: ENHANCEMENT } }, 201);
+      return jsonResponse({ data: { enhancement: PENDING_ENHANCEMENT } }, 202);
     });
 
     const { user } = renderEnhance();
@@ -414,8 +461,11 @@ describe('EnhancePage', () => {
       }
       if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
       if (url.includes('/export')) return jsonResponse({ data: { export: EXPORT_RESULT } }, 201);
+      if (url.startsWith('/api/cv/enhancements/')) {
+        return jsonResponse({ data: { enhancement: ENHANCEMENT } });
+      }
       expect(init?.method).toBe('POST');
-      return jsonResponse({ data: { enhancement: ENHANCEMENT } }, 201);
+      return jsonResponse({ data: { enhancement: PENDING_ENHANCEMENT } }, 202);
     });
 
     const { user } = renderEnhance();

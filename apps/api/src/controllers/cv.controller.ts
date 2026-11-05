@@ -41,7 +41,7 @@ export async function auditCv(req: Request, res: Response): Promise<void> {
     throw AppError.validation({ field: 'file' }, 'Tidak ada file PDF yang diunggah!');
   }
 
-  const response = await cvAuditService.audit({
+  const audit = await cvAuditService.submit({
     file: {
       originalname: file.originalname,
       mimetype: file.mimetype,
@@ -51,7 +51,15 @@ export async function auditCv(req: Request, res: Response): Promise<void> {
     userId: auth.userId,
   });
 
-  res.status(200).json({ data: response });
+  res.status(202).json({ data: { audit } });
+}
+
+/** GET /api/cv/audits/:auditId - durable background-audit status, owner scoped. */
+export async function getAuditJob(req: Request, res: Response): Promise<void> {
+  const auth = currentAuth(req);
+  const params = validatedParams<{ auditId: string }>(req);
+  const audit = await cvAuditService.getJob(params.auditId, auth.userId);
+  res.json({ data: { audit } });
 }
 
 /** GET /api/cv/audit/usage - free quota and effective price for the signed-in account. */
@@ -130,7 +138,7 @@ export async function enhanceCv(req: Request, res: Response): Promise<void> {
     options: body.options,
   });
 
-  res.status(201).json({ data: { enhancement } });
+  res.status(202).json({ data: { enhancement } });
 }
 
 /** GET /api/cv/enhancements/:enhancementId - owner-scoped Before vs After detail. */

@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { disconnectPrisma, isDatabaseConfigured } from './db/prisma.js';
 import { logger } from './utils/logger.js';
+import { startCvWorker, stopCvWorker } from './workers/cv.worker.js';
 import { startScreeningWorker, stopScreeningWorker } from './workers/screening.worker.js';
 
 /**
@@ -31,8 +32,8 @@ const server = app.listen(env.PORT, () => {
 
   // Without Redis there is no shared queue to consume, so this process drains it itself.
   if (!env.REDIS_URL) {
-    void startScreeningWorker().catch((error: unknown) => {
-      logger.error({ err: error }, 'Could not start the in-process screening worker');
+    void Promise.all([startScreeningWorker(), startCvWorker()]).catch((error: unknown) => {
+      logger.error({ err: error }, 'Could not start the in-process background workers');
     });
   }
 });
@@ -57,6 +58,11 @@ async function shutdown(signal: string): Promise<void> {
       await stopScreeningWorker();
     } catch (workerError) {
       logger.error({ err: workerError }, 'Error while stopping the screening worker');
+    }
+    try {
+      await stopCvWorker();
+    } catch (workerError) {
+      logger.error({ err: workerError }, 'Error while stopping the CV worker');
     }
     try {
       await disconnectPrisma();

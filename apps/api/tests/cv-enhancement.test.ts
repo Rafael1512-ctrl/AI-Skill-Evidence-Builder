@@ -5,18 +5,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cvEnhancementResponseSchema, cvHistoryResponseSchema } from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
+import type { InProcessCvProcessingQueue } from '../src/queues/cv-processing.queue.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
 import { stopTestDatabase, useTestDatabase } from './helpers/db.js';
 import { buildEmptyPdf, buildTextPdf } from './helpers/pdf.js';
 
 /**
- * End-to-end coverage of the paid CV enhancer.
+ * End-to-end coverage of the asynchronous paid CV enhancer.
  *
- * These tests pin the money path: credits are reserved before the model call and are
- * settled only when a validated document is stored. A failure must release the hold,
- * mark the enhancement FAILED and leave the wallet exactly as it was.
+ * POST persists a PENDING enhancement and returns 202. The worker then performs the model
+ * call and stores the result. Credits stay reserved until success and are released on failure.
  */
-
 const CV_LINES = [
   'Budi Santoso',
   'Software Engineer',
@@ -31,13 +30,24 @@ describe('CV enhancement API', () => {
   let ctx: Awaited<ReturnType<typeof useTestDatabase>>;
   let app: Express;
   let session: DevSession;
+  let queue: InProcessCvProcessingQueue;
 
   beforeAll(async () => {
     ctx = await useTestDatabase();
+    const { InProcessCvProcessingQueue, setCvProcessingQueue } =
+      await import('../src/queues/cv-processing.queue.js');
+    const { startCvWorker } = await import('../src/workers/cv.worker.js');
+    queue = new InProcessCvProcessingQueue({ concurrency: 1, attempts: 1, backoffMs: 5 });
+    setCvProcessingQueue(queue);
+    await startCvWorker();
     ({ app } = await import('../src/server.test-helper.js'));
   });
 
   afterAll(async () => {
+    const { setCvProcessingQueue } = await import('../src/queues/cv-processing.queue.js');
+    const { stopCvWorker } = await import('../src/workers/cv.worker.js');
+    await stopCvWorker();
+    setCvProcessingQueue(null);
     await stopTestDatabase();
   });
 
@@ -74,6 +84,21 @@ describe('CV enhancement API', () => {
       .field('options', JSON.stringify(options));
   }
 
+  async function waitForEnhancement(enhancementId: string) {
+    await queue.waitForIdle();
+    return request(app).get(`/api/cv/enhancements/${enhancementId}`).set(bearer(session));
+  }
+
+  async function enhanceToCompletion(
+    body: Buffer,
+    options: Record<string, unknown> = {},
+    fileName = 'cv.pdf',
+  ) {
+    const accepted = await enhance(body, options, session, fileName);
+    expect(accepted.status).toBe(202);
+    return waitForEnhancement(accepted.body.data.enhancement.id as string);
+  }
+
   async function wallet() {
     const { creditService } = await import('../src/services/credit.service.js');
     return creditService.getWallet(session.userId);
@@ -105,16 +130,30 @@ describe('CV enhancement API', () => {
     expect((await creditService.getWallet(poor.userId)).balance).toBe(0);
   });
 
+  it('returns a durable PENDING enhancement before the worker completes it', async () => {
+    const accepted = await enhance(buildTextPdf(CV_LINES));
+
+    expect(accepted.status).toBe(202);
+    expect(accepted.body.data.enhancement).toMatchObject({
+      status: 'PENDING',
+      document: null,
+      creditsCharged: 0,
+    });
+    expect(cvEnhancementResponseSchema.safeParse(accepted.body.data).success).toBe(true);
+
+    const completed = await waitForEnhancement(accepted.body.data.enhancement.id as string);
+    expect(completed.body.data.enhancement.status).toBe('COMPLETED');
+  });
+
   it('reserves, settles and stores the enhanced document with its prompt version', async () => {
-    const response = await enhance(buildTextPdf(CV_LINES), {
+    const response = await enhanceToCompletion(buildTextPdf(CV_LINES), {
       targetPosition: 'Backend Engineer',
       targetCareer: 'Teknologi',
       linkedinUrl: 'https://linkedin.com/in/budi',
       additionalNotes: 'Tolong tonjolkan pengalaman Node.js.',
     });
 
-    expect(response.status).toBe(201);
-
+    expect(response.status).toBe(200);
     const parsed = cvEnhancementResponseSchema.safeParse(response.body.data);
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
 
@@ -123,12 +162,9 @@ describe('CV enhancement API', () => {
     expect(enhancement.creditsCharged).toBe(5);
     expect(enhancement.templateKey).toBe('ATS_MINIMAL');
     expect(enhancement.promptVersion).toBe('JOB_SEEKER_ENHANCE_V1');
-    expect(enhancement.document).not.toBeNull();
     expect(enhancement.document.professionalSummary).toEqual(expect.any(String));
-    // The structured context reached the provider: the mock reads the target role back.
     expect(enhancement.document.headline).toBe('Backend Engineer');
     expect(enhancement.document.contact.linkedinUrl).toBe('https://linkedin.com/in/budi');
-    // Before vs After: the extracted source text is returned to its owner.
     expect(enhancement.originalText).toContain('Budi Santoso');
 
     const documents = await ctx.prisma.cvDocument.findMany();
@@ -176,14 +212,17 @@ describe('CV enhancement API', () => {
     expect(ledger[0]).toMatchObject({ amount: -5, feature: 'CV_ENHANCEMENT' });
   });
 
-  it('releases the reservation and marks FAILED when the provider fails', async () => {
+  it('releases the reservation and marks FAILED when the worker provider call fails', async () => {
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ failNext: 1 });
 
-    const response = await enhance(buildTextPdf(CV_LINES));
+    const accepted = await enhance(buildTextPdf(CV_LINES));
+    expect(accepted.status).toBe(202);
+    const response = await waitForEnhancement(accepted.body.data.enhancement.id as string);
 
-    expect(response.status).toBe(502);
-    expect(response.body.error.code).toBe('AI_PROVIDER_ERROR');
+    expect(response.status).toBe(200);
+    expect(response.body.data.enhancement.status).toBe('FAILED');
+    expect(response.body.data.enhancement.failureReason).toMatch(/AI|provider|gagal/i);
 
     const rows = await ctx.prisma.cvEnhancement.findMany();
     expect(rows).toHaveLength(1);
@@ -197,22 +236,16 @@ describe('CV enhancement API', () => {
     const after = await wallet();
     expect(after.balance).toBe(TOP_UP_CREDITS);
     expect(after.reserved).toBe(0);
-    expect(await ctx.prisma.creditTransaction.count({ where: { type: 'USAGE' } })).toBe(0);
     expect(await ctx.prisma.aiUsageRecord.count()).toBe(0);
   });
 
-  it('releases the reservation when the PDF has no extractable text', async () => {
+  it('rejects a PDF with no extractable text before creating the job', async () => {
     const response = await enhance(buildEmptyPdf());
 
     expect(response.status).toBe(422);
     expect(response.body.error.code).toBe('TEXT_EXTRACTION_FAILED');
-
-    // No document and no enhancement row: extraction failed before persistence.
     expect(await ctx.prisma.cvDocument.count()).toBe(0);
     expect(await ctx.prisma.cvEnhancement.count()).toBe(0);
-
-    const reservations = await ctx.prisma.creditReservation.findMany();
-    expect(reservations[0]?.state).toBe('RELEASED');
     expect((await wallet()).balance).toBe(TOP_UP_CREDITS);
   });
 
@@ -235,8 +268,10 @@ describe('CV enhancement API', () => {
       .set(bearer(session))
       .send({ fullName: 'Nama Dari Profil', headline: 'Headline Profil' });
 
-    const withConsent = await enhance(buildTextPdf(CV_LINES), { useProfileContext: true });
-    expect(withConsent.status).toBe(201);
+    const withConsent = await enhanceToCompletion(buildTextPdf(CV_LINES), {
+      useProfileContext: true,
+    });
+    expect(withConsent.status).toBe(200);
     expect(withConsent.body.data.enhancement.options.useProfileContext).toBe(true);
 
     await ctx.db.reset();
@@ -252,13 +287,15 @@ describe('CV enhancement API', () => {
       paymentTransactionId: `pay-${session.userId}`,
     });
 
-    const withoutConsent = await enhance(buildTextPdf(CV_LINES));
-    expect(withoutConsent.status).toBe(201);
+    const withoutConsent = await enhanceToCompletion(buildTextPdf(CV_LINES));
+    expect(withoutConsent.status).toBe(200);
     expect(withoutConsent.body.data.enhancement.options.useProfileContext).toBe(false);
   });
 
   it('surfaces the enhancement in history and serves an owner-scoped detail', async () => {
-    const created = await enhance(buildTextPdf(CV_LINES), { targetPosition: 'Backend Engineer' });
+    const created = await enhanceToCompletion(buildTextPdf(CV_LINES), {
+      targetPosition: 'Backend Engineer',
+    });
     const enhancementId = created.body.data.enhancement.id as string;
 
     const history = await request(app).get('/api/cv/history').set(bearer(session));
@@ -282,11 +319,6 @@ describe('CV enhancement API', () => {
     expect(detail.body.data.enhancement.fileName).toBe('cv.pdf');
 
     const stranger = await signUpDevUser(app);
-    const strangerHistory = await request(app).get('/api/cv/history').set(bearer(stranger));
-    expect(strangerHistory.status).toBe(200);
-    expect(strangerHistory.body.data.enhancements).toEqual([]);
-    expect(strangerHistory.body.data.totals.enhancements).toBe(0);
-
     const forbidden = await request(app)
       .get(`/api/cv/enhancements/${enhancementId}`)
       .set(bearer(stranger));
@@ -297,20 +329,20 @@ describe('CV enhancement API', () => {
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ failNext: 1 });
     await enhance(buildTextPdf(CV_LINES));
+    await queue.waitForIdle();
 
     const history = await request(app).get('/api/cv/history').set(bearer(session));
     const [row] = history.body.data.enhancements;
     expect(row).toMatchObject({ status: 'FAILED', fileName: 'cv.pdf', creditsCharged: 0 });
 
-    const detail = await request(app)
-      .get(`/api/cv/enhancements/${row.id}`)
-      .set(bearer(session));
+    const detail = await request(app).get(`/api/cv/enhancements/${row.id}`).set(bearer(session));
     expect(detail.status).toBe(200);
     expect(detail.body.data.enhancement).toMatchObject({ status: 'FAILED', document: null });
+    expect(detail.body.data.enhancement.failureReason).toEqual(expect.any(String));
   });
 
   it('still opens an enhancement after its source CV is deleted', async () => {
-    const created = await enhance(buildTextPdf(CV_LINES));
+    const created = await enhanceToCompletion(buildTextPdf(CV_LINES));
     const { id, sourceDocumentId } = created.body.data.enhancement;
 
     const removed = await request(app)

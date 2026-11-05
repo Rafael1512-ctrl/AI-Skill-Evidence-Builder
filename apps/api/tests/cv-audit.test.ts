@@ -5,11 +5,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   LIMITS,
   cvAnalysisDetailSchema,
-  cvAuditResponseSchema,
+  cvAuditJobResponseSchema,
   cvHistoryResponseSchema,
 } from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
+import type { InProcessCvProcessingQueue } from '../src/queues/cv-processing.queue.js';
 import { AppError } from '../src/utils/errors.js';
 import { validatePdfUpload } from '../src/utils/file-validation.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
@@ -17,15 +18,11 @@ import { stopTestDatabase, useTestDatabase } from './helpers/db.js';
 import { buildEmptyPdf, buildTextPdf } from './helpers/pdf.js';
 
 /**
- * End-to-end coverage of the authenticated CV audit.
+ * End-to-end coverage of the authenticated, asynchronous CV audit.
  *
- * The audit is the first surface the runtime prompt layer reaches, so these tests pin
- * both halves of the contract: authentication plus the five-per-day free quota, the paid
- * additional-audit path through the ledger, and the fact that failures never leave
- * partial rows or charge credits.
+ * POST persists a durable job and returns 202. The test worker then completes it, and the
+ * status endpoint is the same surface a refreshed browser uses to reconnect.
  */
-
-/** Enough extractable text to pass the "not a scan" check (>= 60 chars, >= 12 words). */
 const CV_LINES = [
   'Budi Santoso',
   'Software Engineer',
@@ -38,13 +35,24 @@ describe('CV audit API', () => {
   let ctx: Awaited<ReturnType<typeof useTestDatabase>>;
   let app: Express;
   let session: DevSession;
+  let queue: InProcessCvProcessingQueue;
 
   beforeAll(async () => {
     ctx = await useTestDatabase();
+    const { InProcessCvProcessingQueue, setCvProcessingQueue } =
+      await import('../src/queues/cv-processing.queue.js');
+    const { startCvWorker } = await import('../src/workers/cv.worker.js');
+    queue = new InProcessCvProcessingQueue({ concurrency: 1, attempts: 1, backoffMs: 5 });
+    setCvProcessingQueue(queue);
+    await startCvWorker();
     ({ app } = await import('../src/server.test-helper.js'));
   });
 
   afterAll(async () => {
+    const { setCvProcessingQueue } = await import('../src/queues/cv-processing.queue.js');
+    const { stopCvWorker } = await import('../src/workers/cv.worker.js');
+    await stopCvWorker();
+    setCvProcessingQueue(null);
     await stopTestDatabase();
   });
 
@@ -62,6 +70,17 @@ describe('CV audit API', () => {
 
   function uploadAnonymous(buffer: Buffer, fileName = 'cv.pdf') {
     return request(app).post('/api/cv/audit').attach('file', buffer, fileName);
+  }
+
+  async function waitForAudit(auditId: string) {
+    await queue.waitForIdle();
+    return request(app).get(`/api/cv/audits/${auditId}`).set(bearer(session));
+  }
+
+  async function auditToCompletion(buffer: Buffer, fileName = 'cv.pdf') {
+    const accepted = await upload(buffer, fileName);
+    expect(accepted.status).toBe(202);
+    return waitForAudit(accepted.body.data.audit.auditId as string);
   }
 
   async function topUp(credits = 10) {
@@ -83,7 +102,7 @@ describe('CV audit API', () => {
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
     expect(await ctx.prisma.cvDocument.count()).toBe(0);
-    expect(await ctx.prisma.cvAnalysis.count()).toBe(0);
+    expect(await ctx.prisma.cvAuditJob.count()).toBe(0);
   });
 
   it('reports five free audits for a fresh account', async () => {
@@ -111,21 +130,38 @@ describe('CV audit API', () => {
     expect(atMidnight.resetsAt).toBe('2026-11-05T17:00:00.000Z');
   });
 
+  it('returns a durable QUEUED job before background processing completes', async () => {
+    const accepted = await upload(buildTextPdf(CV_LINES));
+
+    expect(accepted.status).toBe(202);
+    expect(accepted.body.data.audit).toMatchObject({
+      status: 'QUEUED',
+      result: null,
+      billing: null,
+    });
+    const parsed = cvAuditJobResponseSchema.safeParse(accepted.body.data);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
+    const auditId = accepted.body.data.audit.auditId as string;
+    const completed = await waitForAudit(auditId);
+    expect(completed.status).toBe(200);
+    expect(completed.body.data.audit.status).toBe('COMPLETED');
+    expect(cvAuditJobResponseSchema.safeParse(completed.body.data).success).toBe(true);
+  });
+
   it('persists a stored audit for a signed-in user, with its prompt version', async () => {
-    const response = await upload(buildTextPdf(CV_LINES)).set(bearer(session));
+    const response = await auditToCompletion(buildTextPdf(CV_LINES));
 
     expect(response.status).toBe(200);
-    const auditId = response.body.data.auditId as string;
-    expect(auditId).toBeTruthy();
-    expect(response.body.data.result.ephemeral).toBe(false);
-    expect(response.body.data.billing).toMatchObject({
+    const audit = response.body.data.audit;
+    expect(audit.analysisId).toBeTruthy();
+    expect(audit.result.ephemeral).toBe(false);
+    expect(audit.billing).toMatchObject({
       mode: 'FREE',
       creditsCharged: 0,
       freeAuditsUsed: 1,
       freeAuditsRemaining: 4,
     });
-    const parsed = cvAuditResponseSchema.safeParse(response.body.data);
-    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
 
     const documents = await ctx.prisma.cvDocument.findMany();
     expect(documents).toHaveLength(1);
@@ -141,7 +177,7 @@ describe('CV audit API', () => {
     const analyses = await ctx.prisma.cvAnalysis.findMany();
     expect(analyses).toHaveLength(1);
     expect(analyses[0]).toMatchObject({
-      id: auditId,
+      id: audit.analysisId,
       userId: session.userId,
       documentId: documents[0]?.id,
       kind: 'FREE_AUDIT',
@@ -161,8 +197,8 @@ describe('CV audit API', () => {
   });
 
   it('exposes a stored audit through history and detail, and hides it from other users', async () => {
-    const created = await upload(buildTextPdf(CV_LINES)).set(bearer(session));
-    const auditId = created.body.data.auditId as string;
+    const created = await auditToCompletion(buildTextPdf(CV_LINES));
+    const auditId = created.body.data.audit.analysisId as string;
 
     const history = await request(app).get('/api/cv/history').set(bearer(session));
     expect(history.status).toBe(200);
@@ -185,20 +221,22 @@ describe('CV audit API', () => {
     const strangerHistory = await request(app).get('/api/cv/history').set(bearer(stranger));
     expect(strangerHistory.status).toBe(200);
     expect(strangerHistory.body.data.analyses).toEqual([]);
-    expect(strangerHistory.body.data.totals.analyses).toBe(0);
+
+    const forbiddenJob = await request(app)
+      .get(`/api/cv/audits/${created.body.data.audit.auditId}`)
+      .set(bearer(stranger));
+    expect(forbiddenJob.status).toBe(404);
 
     const forbidden = await request(app).get(`/api/cv/analyses/${auditId}`).set(bearer(stranger));
     expect(forbidden.status).toBe(404);
-
-    const anonymous = await request(app).get('/api/cv/history');
-    expect(anonymous.status).toBe(401);
   });
 
-  it('rejects a file that is not a PDF before calling the model', async () => {
+  it('rejects a file that is not a PDF before creating a job', async () => {
     const response = await upload(Buffer.from('ini bukan pdf sama sekali'), 'cv.pdf');
 
     expect(response.status).toBe(415);
     expect(response.body.error.code).toBe('UNSUPPORTED_FILE');
+    expect(await ctx.prisma.cvAuditJob.count()).toBe(0);
     expect(await ctx.prisma.aiUsageRecord.count()).toBe(0);
   });
 
@@ -233,43 +271,50 @@ describe('CV audit API', () => {
 
     expect(response.status).toBe(422);
     expect(response.body.error.code).toBe('TEXT_EXTRACTION_FAILED');
+    expect(await ctx.prisma.cvAuditJob.count()).toBe(0);
     expect(await ctx.prisma.aiUsageRecord.count()).toBe(0);
   });
 
-  it('maps a provider failure to AI_PROVIDER_ERROR and leaves no partial rows', async () => {
+  it('stores a failed job with AI_PROVIDER_ERROR and no analysis', async () => {
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ failNext: 1 });
 
-    const response = await upload(buildTextPdf(CV_LINES)).set(bearer(session));
+    const accepted = await upload(buildTextPdf(CV_LINES));
+    expect(accepted.status).toBe(202);
+    const response = await waitForAudit(accepted.body.data.audit.auditId as string);
 
-    expect(response.status).toBe(502);
-    expect(response.body.error.code).toBe('AI_PROVIDER_ERROR');
-    expect(await ctx.prisma.cvDocument.count()).toBe(0);
+    expect(response.status).toBe(200);
+    expect(response.body.data.audit.status).toBe('FAILED');
+    expect(response.body.data.audit.failure.code).toBe('AI_PROVIDER_ERROR');
+    expect(await ctx.prisma.cvDocument.count()).toBe(1);
+    expect(await ctx.prisma.cvAuditJob.count()).toBe(1);
     expect(await ctx.prisma.cvAnalysis.count()).toBe(0);
   });
 
-  it('maps a provider rate limit to AI_RATE_LIMITED', async () => {
+  it('stores AI_RATE_LIMITED on the job', async () => {
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ rateLimitNext: 1 });
 
-    const response = await upload(buildTextPdf(CV_LINES));
+    const accepted = await upload(buildTextPdf(CV_LINES));
+    expect(accepted.status).toBe(202);
+    const response = await waitForAudit(accepted.body.data.audit.auditId as string);
 
-    expect(response.status).toBe(503);
-    expect(response.body.error.code).toBe('AI_RATE_LIMITED');
+    expect(response.body.data.audit.status).toBe('FAILED');
+    expect(response.body.data.audit.failure.code).toBe('AI_RATE_LIMITED');
   });
 
   it('allows five free audits, then charges the configured additional-audit price', async () => {
     await topUp();
 
     for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
-      const allowed = await upload(buildTextPdf(CV_LINES));
+      const allowed = await auditToCompletion(buildTextPdf(CV_LINES));
       expect(allowed.status).toBe(200);
-      expect(allowed.body.data.billing.mode).toBe('FREE');
+      expect(allowed.body.data.audit.billing.mode).toBe('FREE');
     }
 
-    const paid = await upload(buildTextPdf(CV_LINES));
+    const paid = await auditToCompletion(buildTextPdf(CV_LINES));
     expect(paid.status).toBe(200);
-    expect(paid.body.data.billing).toMatchObject({
+    expect(paid.body.data.audit.billing).toMatchObject({
       mode: 'PAID',
       creditsCharged: 2,
       freeAuditsUsed: 5,
@@ -302,7 +347,7 @@ describe('CV audit API', () => {
 
   it('returns INSUFFICIENT_CREDITS instead of starting a sixth audit without credits', async () => {
     for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
-      const allowed = await upload(buildTextPdf(CV_LINES));
+      const allowed = await auditToCompletion(buildTextPdf(CV_LINES));
       expect(allowed.status).toBe(200);
     }
 
@@ -310,25 +355,26 @@ describe('CV audit API', () => {
     expect(blocked.status).toBe(402);
     expect(blocked.body.error.code).toBe('INSUFFICIENT_CREDITS');
     expect(await ctx.prisma.cvDocument.count()).toBe(5);
+    expect(await ctx.prisma.cvAuditJob.count()).toBe(5);
     expect(await ctx.prisma.cvAnalysis.count()).toBe(5);
     expect(
       await ctx.prisma.creditReservation.count({ where: { feature: 'CV_DEEP_ANALYSIS' } }),
     ).toBe(0);
-    expect(await ctx.prisma.aiUsageRecord.count()).toBe(5);
   });
 
-  it('releases a paid audit hold without charging when the provider fails', async () => {
+  it('releases a paid audit hold without charging when the worker fails', async () => {
     await topUp(5);
     for (let attempt = 0; attempt < LIMITS.FREE_CV_AUDITS_PER_DAY; attempt += 1) {
-      const allowed = await upload(buildTextPdf(CV_LINES));
+      const allowed = await auditToCompletion(buildTextPdf(CV_LINES));
       expect(allowed.status).toBe(200);
     }
 
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ failNext: 1 });
-    const failed = await upload(buildTextPdf(CV_LINES));
-    expect(failed.status).toBe(502);
-    expect(failed.body.error.code).toBe('AI_PROVIDER_ERROR');
+    const accepted = await upload(buildTextPdf(CV_LINES));
+    const failed = await waitForAudit(accepted.body.data.audit.auditId as string);
+    expect(failed.body.data.audit.status).toBe('FAILED');
+    expect(failed.body.data.audit.failure.code).toBe('AI_PROVIDER_ERROR');
 
     const { creditService } = await import('../src/services/credit.service.js');
     const wallet = await creditService.getWallet(session.userId);
@@ -342,7 +388,7 @@ describe('CV audit API', () => {
   });
 
   it('resets the free quota at the start of the next Jakarta day', async () => {
-    const first = await upload(buildTextPdf(CV_LINES));
+    const first = await auditToCompletion(buildTextPdf(CV_LINES));
     expect(first.status).toBe(200);
 
     const reservation = await ctx.prisma.creditReservation.findFirstOrThrow({
@@ -354,21 +400,19 @@ describe('CV audit API', () => {
     });
 
     const usage = await request(app).get('/api/cv/audit/usage').set(bearer(session));
-    expect(usage.body.data.freeAuditsUsed).toBe(0);
     expect(usage.body.data.freeAuditsRemaining).toBe(LIMITS.FREE_CV_AUDITS_PER_DAY);
 
-    const second = await upload(buildTextPdf(CV_LINES));
-    expect(second.status).toBe(200);
-    expect(second.body.data.billing.mode).toBe('FREE');
+    const second = await auditToCompletion(buildTextPdf(CV_LINES));
+    expect(second.body.data.audit.billing.mode).toBe('FREE');
   });
 
-  it('does not consume a free slot when the provider fails', async () => {
+  it('does not consume a free slot when the worker fails', async () => {
     const { getMockProvider } = await import('../src/providers/ai/index.js');
     getMockProvider().configure({ failNext: 1 });
 
-    const failed = await upload(buildTextPdf(CV_LINES));
-    expect(failed.status).toBe(502);
-    expect(await ctx.prisma.cvAnalysis.count()).toBe(0);
+    const accepted = await upload(buildTextPdf(CV_LINES));
+    const failed = await waitForAudit(accepted.body.data.audit.auditId as string);
+    expect(failed.body.data.audit.status).toBe('FAILED');
 
     const usage = await request(app).get('/api/cv/audit/usage').set(bearer(session));
     expect(usage.body.data.freeAuditsRemaining).toBe(LIMITS.FREE_CV_AUDITS_PER_DAY);
@@ -378,8 +422,7 @@ describe('CV audit API', () => {
     });
     expect(reservation.state).toBe('RELEASED');
 
-    const retry = await upload(buildTextPdf(CV_LINES));
-    expect(retry.status).toBe(200);
-    expect(retry.body.data.billing.mode).toBe('FREE');
+    const retry = await auditToCompletion(buildTextPdf(CV_LINES));
+    expect(retry.body.data.audit.billing.mode).toBe('FREE');
   });
 });

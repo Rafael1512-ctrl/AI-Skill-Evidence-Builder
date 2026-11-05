@@ -386,7 +386,7 @@ export function ScreeningJobPage() {
             hasil pindai belum didukung.
           </p>
           <input
-            className="mt-3 text-sm"
+            className="mt-3 w-full cursor-pointer rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-[var(--color-surface-muted)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-content)] file:transition-colors hover:file:bg-[var(--color-border-subtle)]"
             type="file"
             multiple
             accept=".pdf,.zip"

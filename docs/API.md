@@ -74,6 +74,7 @@ runtime chance (`PROJECT_CONTEXT.md` §6):
 | GET    | `/cv/templates`                          | –       | 0                                   |
 | GET    | `/cv/audit/usage`                        | session | 0                                   |
 | POST   | `/cv/audit`                              | session | 5/day free, then `CV_DEEP_ANALYSIS` |
+| GET    | `/cv/audits/:auditId`                    | session | 0                                   |
 | GET    | `/cv/history`                            | session | 0                                   |
 | POST   | `/cv/enhance`                            | session | `CV_ENHANCEMENT`                    |
 | GET    | `/cv/enhancements/:enhancementId`        | session | 0                                   |
@@ -88,7 +89,13 @@ web app reads it at `/audit/history` and `/enhance/history`; the owner-scoped
 An enhancement stays readable when it failed (`document: null`) or when its source CV was deleted
 (`originalText: ''`, `fileName` kept). Exporting from history is charged like any other export.
 
-Uploads are `multipart/form-data`. The audit requires a session. Each account receives
+Uploads are `multipart/form-data`. Both CV writing flows validate and extract the PDF before
+returning `202`. The response is a durable job (`audit.status` or `enhancement.status`); AI
+processing continues in the worker, and the client polls `GET /cv/audits/:auditId` or
+`GET /cv/enhancements/:enhancementId` until `COMPLETED` or `FAILED`. The web pages keep those ids in
+their URL query string, so a refresh resumes polling rather than losing the request.
+
+The audit requires a session. Each account receives
 `LIMITS.FREE_CV_AUDITS_PER_DAY` (5) successful audits per Jakarta calendar day; a request that
 fails before producing a stored analysis releases its quota reservation. Later audits reserve and
 settle the effective `CV_DEEP_ANALYSIS` price through the ledger. `GET /cv/audit/usage` returns the

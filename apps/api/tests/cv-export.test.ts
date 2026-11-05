@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { cvExportResponseSchema } from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
+import type { InProcessCvProcessingQueue } from '../src/queues/cv-processing.queue.js';
 import { setPdfRendererForTests, type PdfRenderer } from '../src/providers/pdf/index.js';
 import { AppError } from '../src/utils/errors.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
@@ -33,13 +34,24 @@ describe('CV export API', () => {
   let ctx: Awaited<ReturnType<typeof useTestDatabase>>;
   let app: Express;
   let session: DevSession;
+  let queue: InProcessCvProcessingQueue;
 
   beforeAll(async () => {
     ctx = await useTestDatabase();
+    const { InProcessCvProcessingQueue, setCvProcessingQueue } =
+      await import('../src/queues/cv-processing.queue.js');
+    const { startCvWorker } = await import('../src/workers/cv.worker.js');
+    queue = new InProcessCvProcessingQueue({ concurrency: 1, attempts: 1, backoffMs: 5 });
+    setCvProcessingQueue(queue);
+    await startCvWorker();
     ({ app } = await import('../src/server.test-helper.js'));
   });
 
   afterAll(async () => {
+    const { setCvProcessingQueue } = await import('../src/queues/cv-processing.queue.js');
+    const { stopCvWorker } = await import('../src/workers/cv.worker.js');
+    await stopCvWorker();
+    setCvProcessingQueue(null);
     await stopTestDatabase();
   });
 
@@ -83,8 +95,15 @@ describe('CV export API', () => {
       .attach('file', buildTextPdf(CV_LINES), 'cv.pdf')
       .field('options', JSON.stringify({ templateKey: 'ATS_MINIMAL' }));
 
-    expect(response.status, JSON.stringify(response.body)).toBe(201);
-    return response.body.data.enhancement.id as string;
+    expect(response.status, JSON.stringify(response.body)).toBe(202);
+    const enhancementId = response.body.data.enhancement.id as string;
+    await queue.waitForIdle();
+
+    const detail = await request(app)
+      .get(`/api/cv/enhancements/${enhancementId}`)
+      .set(bearer(target));
+    expect(detail.body.data.enhancement.status).toBe('COMPLETED');
+    return enhancementId;
   }
 
   function exportRequest(enhancementId: string, target: DevSession = session, body: object = {}) {
@@ -242,7 +261,8 @@ describe('CV export API', () => {
       .attach('file', buildTextPdf(CV_LINES), 'cv.pdf')
       .field('options', JSON.stringify({}));
 
-    expect(failed.status).toBe(502);
+    expect(failed.status).toBe(202);
+    await queue.waitForIdle();
     const row = await ctx.prisma.cvEnhancement.findFirst();
     expect(row?.status).toBe('FAILED');
 

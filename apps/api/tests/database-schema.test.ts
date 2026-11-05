@@ -1,9 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+
+import { startTestDatabase, stopTestDatabase } from './helpers/db.js';
 
 /**
  * Schema/migration guards for Phase 3.
@@ -31,36 +33,50 @@ function readCommittedMigration(): string {
 }
 
 /**
- * Prisma reads the schema and emits the DDL that *should* exist. This is the
- * authoritative drift check: it sees columns, indexes, constraints and enums, not
- * just table names.
+ * Ask Prisma whether applying the committed migrations produces the schema. This compares
+ * database semantics, so an `ALTER TABLE ... ADD COLUMN` in a later migration correctly
+ * matches the same column declared inline in a from-empty diff.
  */
-function regenerateMigrationFromSchema(): string {
+function diffDatabaseAgainstSchema(databaseUrl: string): Promise<void> {
   const prismaCli = resolve(repoRoot, 'node_modules/prisma/build/index.js');
-  const stdout = execFileSync(
-    process.execPath,
-    [prismaCli, 'migrate', 'diff', '--from-empty', '--to-schema', schemaPath, '--script'],
-    {
-      cwd: apiRoot,
-      encoding: 'utf8',
-      timeout: 120_000,
-      env: { ...process.env, CHECKPOINT_DISABLE: '1' },
-    },
-  );
-
-  // The CLI may prepend informational lines before the script; the script itself
-  // always starts at the CreateSchema header.
-  const start = stdout.search(/^-- CreateSchema$/m);
-  return start === -1 ? stdout : stdout.slice(start);
-}
-
-/** Compare SQL ignoring trailing whitespace and trailing blank lines only. */
-function normalise(sql: string): string {
-  return sql
-    .split('\n')
-    .map((line) => line.replace(/[ \t]+$/, ''))
-    .join('\n')
-    .replace(/\n+$/, '');
+  return new Promise((resolvePromise, reject) => {
+    execFile(
+      process.execPath,
+      [
+        prismaCli,
+        'migrate',
+        'diff',
+        '--from-config-datasource',
+        '--to-schema',
+        schemaPath,
+        '--exit-code',
+      ],
+      {
+        cwd: apiRoot,
+        encoding: 'utf8',
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          CHECKPOINT_DISABLE: '1',
+          DATABASE_URL: databaseUrl,
+          DIRECT_URL: databaseUrl,
+        },
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolvePromise();
+          return;
+        }
+        reject(
+          new Error(
+            [`Migration drift detected (exit ${error.code ?? 'unknown'}).`, stdout, stderr].join(
+              '\n',
+            ),
+          ),
+        );
+      },
+    );
+  });
 }
 
 function schemaSource(): string {
@@ -85,10 +101,13 @@ describe('database schema', () => {
   const schema = schemaSource();
   const migration = readCommittedMigration();
 
-  it('keeps the committed migration in sync with schema.prisma', () => {
-    const regenerated = regenerateMigrationFromSchema();
-
-    expect(normalise(regenerated)).toBe(normalise(migration));
+  it('keeps the migrated database in sync with schema.prisma', async () => {
+    const database = await startTestDatabase();
+    try {
+      await expect(diffDatabaseAgainstSchema(database.url)).resolves.toBeUndefined();
+    } finally {
+      await stopTestDatabase();
+    }
   });
 
   it('creates one table per mapped model', () => {
@@ -107,7 +126,7 @@ describe('database schema', () => {
     );
 
     expect(new Set(declared)).toEqual(new Set(enumNames(schema)));
-    expect(declared).toHaveLength(20);
+    expect(declared).toHaveLength(enumNames(schema).length);
   });
 
   it('gives every table a primary key', () => {

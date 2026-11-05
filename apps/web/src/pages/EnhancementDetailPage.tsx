@@ -6,8 +6,14 @@ import { EnhancementResultView } from '../components/EnhancementResultView.js';
 import { ApiError } from '../lib/api.js';
 import { useEnhancementDetailQuery } from '../lib/cvHistory.js';
 
-/** Shown instead of a result. `failureReason` is internal, so it is never rendered here. */
-function StatusNotice({ status }: { status: CvEnhancementDetail['status'] }) {
+/** Shown instead of a result while queued/processing or after a failed worker attempt. */
+function StatusNotice({
+  status,
+  failureReason,
+}: {
+  status: CvEnhancementDetail['status'];
+  failureReason: string | null;
+}) {
   const failed = status === 'FAILED' || status === 'REFUNDED';
 
   return (
@@ -17,7 +23,8 @@ function StatusNotice({ status }: { status: CvEnhancementDetail['status'] }) {
       </h2>
       <p className="mt-1 text-[var(--color-content-muted)]">
         {failed
-          ? 'Tidak ada hasil yang tersimpan, dan kredit untuk percobaan ini tidak ditagihkan.'
+          ? (failureReason ??
+            'Tidak ada hasil yang tersimpan, dan kredit untuk percobaan ini tidak ditagihkan.')
           : 'Hasilnya akan muncul di sini setelah selesai.'}
       </p>
     </section>
@@ -67,7 +74,7 @@ export function EnhancementDetailPage() {
       ) : null}
 
       {enhancement && enhancement.status !== 'COMPLETED' ? (
-        <StatusNotice status={enhancement.status} />
+        <StatusNotice status={enhancement.status} failureReason={enhancement.failureReason} />
       ) : null}
 
       <Link to="/enhance/history" className="text-sm font-medium text-[var(--color-brand)]">

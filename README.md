@@ -20,6 +20,7 @@ requirement stay visible instead of silently disappearing.
   `CV_DEEP_ANALYSIS` credit price, with structured ATS-oriented feedback.
 - Paid CV enhancement (5 credits) with an explicit anti-fabrication contract, target role tailoring,
   optional GitHub / LinkedIn / portfolio links, and a Before vs After preview.
+- Audit and enhancement run as durable background jobs; refreshing the page resumes status polling.
 - Three export templates: ATS Minimal, Professional, Modern.
 
 **HRD / Recruiter**
@@ -54,7 +55,7 @@ requirement stay visible instead of silently disappearing.
 | Backend  | Node 20+, Express 5, TypeScript (ESM), Zod 4, Pino                             |
 | Database | PostgreSQL (Supabase) via Prisma 7                                             |
 | Auth     | Supabase Auth (email/password + Google OAuth), server-side JWKS verification   |
-| Queue    | BullMQ + Redis (in-process driver when `REDIS_URL` is unset)                   |
+| Queue    | BullMQ + Redis for screening, audit and enhancement (in-process when unset)    |
 | AI       | DeepSeek via the OpenAI-compatible SDK, behind a swappable provider interface  |
 | PDF      | `pdf-parse` in, Puppeteer + HTML/CSS templates out                             |
 | Tests    | Vitest, Supertest, React Testing Library, Playwright                           |
@@ -166,7 +167,7 @@ either install Chromium in your own derived image and set `DOCKER_PDF_RENDERER=p
 npm run dev            # API + web together
 npm run dev:api        # API only
 npm run dev:web        # web only
-npm run dev:worker     # screening queue worker
+npm run dev:worker     # screening + CV background worker
 
 npm run lint           # ESLint (flat config)
 npm run typecheck      # tsc --noEmit in every workspace
@@ -210,7 +211,7 @@ The default test suite never makes a real network call.
   ledger atomicity, reservation, scoring and webhook idempotency behaviour is exercised against
   genuine PostgreSQL semantics - no Docker required.
 - AI, payments, GitHub and outbound HTTP are replaced by deterministic mocks.
-- The screening queue runs in-process when `REDIS_URL` is unset, so no Redis is needed either
+- The screening and CV processing queues run in-process when `REDIS_URL` is unset, so no Redis is needed either
   (the worker handler itself is exercised with a stubbed candidate processor).
 - The integration tests boot PGlite in-process and need permission to bind a local socket, which a
   normal shell and a CI runner have (a restricted sandbox does not). PGlite is the only supported

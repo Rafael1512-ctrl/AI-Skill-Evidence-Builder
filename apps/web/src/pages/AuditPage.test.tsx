@@ -72,6 +72,28 @@ const FREE_BILLING = {
   paidAuditCredits: 2,
 };
 
+const COMPLETED_AUDIT = {
+  auditId: 'audit-1',
+  status: 'COMPLETED',
+  analysisId: 'analysis-1',
+  result: AUDIT_RESULT,
+  billing: FREE_BILLING,
+  failure: null,
+  createdAt: '2026-09-26T09:59:58.000Z',
+  startedAt: '2026-09-26T09:59:59.000Z',
+  completedAt: '2026-09-26T10:00:00.000Z',
+};
+
+const QUEUED_AUDIT = {
+  ...COMPLETED_AUDIT,
+  status: 'QUEUED',
+  analysisId: null,
+  result: null,
+  billing: null,
+  startedAt: null,
+  completedAt: null,
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -87,7 +109,7 @@ function mockSignedInApi(options?: {
   auditStatus?: number;
   usage?: typeof AUDIT_USAGE;
 }) {
-  fetchMock.mockImplementation(async (input: unknown) => {
+  fetchMock.mockImplementation(async (input: unknown, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith('/api/profile')) {
       return jsonResponse({
@@ -100,23 +122,27 @@ function mockSignedInApi(options?: {
     if (url.startsWith('/api/cv/audit/usage')) {
       return jsonResponse({ data: options?.usage ?? AUDIT_USAGE });
     }
+    if (url.startsWith('/api/cv/audits/')) {
+      return jsonResponse({ data: { audit: COMPLETED_AUDIT } });
+    }
     if (url.startsWith('/api/cv/audit')) {
+      if (init?.method === 'POST' && options?.auditStatus === undefined) {
+        return jsonResponse({ data: { audit: QUEUED_AUDIT } }, 202);
+      }
       return jsonResponse(
-        options?.auditBody ?? {
-          data: { auditId: 'audit-1', result: AUDIT_RESULT, billing: FREE_BILLING },
-        },
-        options?.auditStatus ?? 200,
+        options?.auditBody ?? { data: { audit: QUEUED_AUDIT } },
+        options?.auditStatus ?? 202,
       );
     }
     return jsonResponse({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404);
   });
 }
 
-function renderAudit() {
+function renderAudit(initialEntry = '/audit') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/audit']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <AuthProvider>
           <AuditPage />
         </AuthProvider>
@@ -173,6 +199,16 @@ describe('AuditPage', () => {
     const init = call?.[1] as RequestInit;
     expect(init.method).toBe('POST');
     expect(init.body).toBeInstanceOf(FormData);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/cv/audits/audit-1')).toBe(
+      true,
+    );
+  });
+
+  it('resumes a background audit from the URL after a refresh', async () => {
+    renderAudit('/audit?auditId=audit-1');
+
+    expect(await screen.findByText('Tambahkan metrik')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/cv/audits/audit-1', expect.anything());
   });
 
   it('rejects a non-PDF selection before calling the API', async () => {

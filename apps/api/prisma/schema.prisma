@@ -7,9 +7,9 @@
 //  - Balance mutation always happens inside a transaction via the credit ledger.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
-  runtime  = "nodejs"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
   moduleFormat = "esm"
 }
 
@@ -19,9 +19,15 @@ datasource db {
   provider = "postgresql"
 }
 
-/* -------------------------------------------------------------------------- */
-/* Enums                                                                       */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Enums
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 enum UserRole {
   USER
@@ -49,6 +55,18 @@ enum EnhancementStatus {
   COMPLETED
   FAILED
   REFUNDED
+}
+
+enum CvAuditJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum CvAuditMode {
+  FREE
+  PAID
 }
 
 enum ScreeningJobState {
@@ -168,9 +186,15 @@ enum ScreeningJobEventType {
   ERROR
 }
 
-/* -------------------------------------------------------------------------- */
-/* Identity                                                                    */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Identity
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model User {
   id            String   @id @default(cuid())
@@ -200,24 +224,25 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  identities             AuthIdentity[]
-  wallet                 CreditWallet?
-  creditTransactions     CreditTransaction[]
-  creditReservations     CreditReservation[]
-  aiUsageRecords         AiUsageRecord[]
-  payments               PaymentTransaction[]
-  cvDocuments            CvDocument[]
-  cvAnalyses             CvAnalysis[]
-  enhancements           CvEnhancement[]
-  screeningJobs          ScreeningJob[]
-  recruiterPreference    RecruiterPreference?
-  preferenceVersions     RecruiterPreferenceVersion[]
-  testimonials           Testimonial[]  @relation("TestimonialAuthor")
-  moderatedTestimonials  Testimonial[]  @relation("TestimonialModerator")
-  integrationSnapshots   IntegrationEvidenceSnapshot[]
-  generatedReports       GeneratedReport[]
-  featurePricingUpdates  FeaturePricing[] @relation("FeaturePricingUpdatedBy")
-  creditAdjustments      CreditTransaction[] @relation("CreditAdjustmentActor")
+  identities            AuthIdentity[]
+  wallet                CreditWallet?
+  creditTransactions    CreditTransaction[]
+  creditReservations    CreditReservation[]
+  aiUsageRecords        AiUsageRecord[]
+  payments              PaymentTransaction[]
+  cvDocuments           CvDocument[]
+  cvAnalyses            CvAnalysis[]
+  cvAuditJobs           CvAuditJob[]
+  enhancements          CvEnhancement[]
+  screeningJobs         ScreeningJob[]
+  recruiterPreference   RecruiterPreference?
+  preferenceVersions    RecruiterPreferenceVersion[]
+  testimonials          Testimonial[]                 @relation("TestimonialAuthor")
+  moderatedTestimonials Testimonial[]                 @relation("TestimonialModerator")
+  integrationSnapshots  IntegrationEvidenceSnapshot[]
+  generatedReports      GeneratedReport[]
+  featurePricingUpdates FeaturePricing[]              @relation("FeaturePricingUpdatedBy")
+  creditAdjustments     CreditTransaction[]           @relation("CreditAdjustmentActor")
 
   @@index([role])
   @@index([createdAt])
@@ -237,8 +262,8 @@ model AuthIdentity {
   passwordHash String? @map("password_hash")
   passwordSalt String? @map("password_salt")
 
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -247,9 +272,15 @@ model AuthIdentity {
   @@map("auth_identities")
 }
 
-/* -------------------------------------------------------------------------- */
-/* Credit economy                                                              */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Credit economy
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model CreditWallet {
   id     String @id @default(cuid())
@@ -274,19 +305,19 @@ model CreditWallet {
 }
 
 model CreditTransaction {
-  id       String                @id @default(cuid())
-  walletId String                @map("wallet_id")
-  userId   String                @map("user_id")
-  type     CreditTransactionType
+  id            String                @id @default(cuid())
+  walletId      String                @map("wallet_id")
+  userId        String                @map("user_id")
+  type          CreditTransactionType
   /// Signed delta applied to the wallet balance.
-  amount   Int
+  amount        Int
   /// Wallet balance immediately after this entry, for auditability.
-  balanceAfter Int               @map("balance_after")
+  balanceAfter  Int                   @map("balance_after")
   /// Wallet balance immediately before this entry.
-  balanceBefore Int              @map("balance_before")
+  balanceBefore Int                   @map("balance_before")
 
-  feature     String?
-  description String
+  feature       String?
+  description   String
   referenceType String? @map("reference_type")
   referenceId   String? @map("reference_id")
 
@@ -316,21 +347,21 @@ model CreditReservation {
   userId   String @map("user_id")
 
   feature         String
-  reservedCredits Int    @map("reserved_credits")
+  reservedCredits Int              @map("reserved_credits")
   /// Final charge. Always <= reservedCredits.
-  settledCredits  Int?   @map("settled_credits")
+  settledCredits  Int?             @map("settled_credits")
   state           ReservationState @default(ACTIVE)
 
-  referenceType String? @map("reference_type")
-  referenceId   String? @map("reference_id")
+  referenceType  String? @map("reference_type")
+  referenceId    String? @map("reference_id")
   idempotencyKey String? @unique @map("idempotency_key")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   settledAt DateTime? @map("settled_at")
 
-  wallet    CreditWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet        CreditWallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   screeningJobs ScreeningJob[]
 
   @@index([walletId, state])
@@ -340,9 +371,9 @@ model CreditReservation {
 }
 
 model FeaturePricing {
-  id      String @id @default(cuid())
-  feature String @unique
-  credits Int
+  id              String  @id @default(cuid())
+  feature         String  @unique
+  credits         Int
   updatedByUserId String? @map("updated_by_user_id")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -358,11 +389,11 @@ model AiUsageRecord {
   userId  String? @map("user_id")
   feature String
 
-  provider String
-  model    String
+  provider      String
+  model         String
   /// Runtime prompt version that produced this call (see docs/AI_PROMPTS.md).
   promptVersion String? @map("prompt_version")
-  requestCount Int @default(1) @map("request_count")
+  requestCount  Int     @default(1) @map("request_count")
 
   inputTokens  Int @default(0) @map("input_tokens")
   outputTokens Int @default(0) @map("output_tokens")
@@ -379,7 +410,7 @@ model AiUsageRecord {
   screeningCandidateId String? @map("screening_candidate_id")
   cvEnhancementId      String? @map("cv_enhancement_id")
 
-  latencyMs Int? @map("latency_ms")
+  latencyMs Int?    @map("latency_ms")
   success   Boolean @default(true)
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -392,9 +423,15 @@ model AiUsageRecord {
   @@map("ai_usage_records")
 }
 
-/* -------------------------------------------------------------------------- */
-/* Payments                                                                    */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Payments
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model PaymentTransaction {
   id     String @id @default(cuid())
@@ -402,7 +439,7 @@ model PaymentTransaction {
 
   provider              String
   /// Merchant-generated order id, unique per attempt.
-  orderId               String @unique @map("order_id")
+  orderId               String  @unique @map("order_id")
   providerTransactionId String? @map("provider_transaction_id")
   providerReference     String? @map("provider_reference")
 
@@ -422,7 +459,7 @@ model PaymentTransaction {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   events PaymentWebhookEvent[]
 
   @@index([userId, createdAt])
@@ -441,11 +478,11 @@ model PaymentWebhookEvent {
 
   paymentTransactionId String? @map("payment_transaction_id")
 
-  payload      Json
-  signatureValid Boolean @default(false) @map("signature_valid")
-  processed    Boolean  @default(false)
-  processedAt  DateTime? @map("processed_at")
-  errorMessage String?  @map("error_message")
+  payload        Json
+  signatureValid Boolean   @default(false) @map("signature_valid")
+  processed      Boolean   @default(false)
+  processedAt    DateTime? @map("processed_at")
+  errorMessage   String?   @map("error_message")
 
   receivedAt DateTime @default(now()) @map("received_at")
 
@@ -456,19 +493,25 @@ model PaymentWebhookEvent {
   @@map("payment_webhook_events")
 }
 
-/* -------------------------------------------------------------------------- */
-/* CV documents, analyses and enhancements                                     */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * CV documents, analyses and enhancements
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model CvDocument {
   id     String         @id @default(cuid())
   userId String?        @map("user_id")
   kind   CvDocumentKind @default(ORIGINAL)
 
-  fileName    String  @map("file_name")
-  mimeType    String  @map("mime_type")
-  sizeBytes   Int     @map("size_bytes")
-  pageCount   Int     @default(0) @map("page_count")
+  fileName  String @map("file_name")
+  mimeType  String @map("mime_type")
+  sizeBytes Int    @map("size_bytes")
+  pageCount Int    @default(0) @map("page_count")
 
   /// Extracted plain text. Sensitive personal data: never logged, deleted with the user.
   textContent String? @map("text_content")
@@ -485,6 +528,7 @@ model CvDocument {
 
   user         User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
   analyses     CvAnalysis[]
+  auditJobs    CvAuditJob[]
   enhancements CvEnhancement[] @relation("EnhancementSourceDocument")
   outputs      CvEnhancement[] @relation("EnhancementResultDocument")
 
@@ -494,13 +538,14 @@ model CvDocument {
 }
 
 model CvAnalysis {
-  id         String        @id @default(cuid())
-  documentId String?       @map("document_id")
-  userId     String?       @map("user_id")
+  id         String         @id @default(cuid())
+  documentId String?        @map("document_id")
+  userId     String?        @map("user_id")
+  auditJobId String?        @unique @map("audit_job_id")
   kind       CvAnalysisKind
 
-  provider String
-  model    String
+  provider      String
+  model         String
   /// Runtime prompt version that produced this analysis; null for pre-versioning rows.
   promptVersion String? @map("prompt_version")
 
@@ -515,27 +560,58 @@ model CvAnalysis {
 
   document CvDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
   user     User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditJob CvAuditJob? @relation(fields: [auditJobId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@map("cv_analyses")
 }
 
+model CvAuditJob {
+  id         String           @id @default(cuid())
+  userId     String           @map("user_id")
+  documentId String?          @map("document_id")
+  status     CvAuditJobStatus @default(QUEUED)
+  mode       CvAuditMode
+
+  reservationId    String   @unique @map("reservation_id")
+  creditsCharged   Int      @default(0) @map("credits_charged")
+  freeAuditsUsed   Int      @map("free_audits_used")
+  paidAuditCredits Int      @map("paid_audit_credits")
+  resetsAt         DateTime @map("resets_at")
+
+  failureCode   String? @map("failure_code")
+  failureReason String? @map("failure_reason")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document CvDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  analysis CvAnalysis?
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("cv_audit_jobs")
+}
+
 model CvEnhancement {
-  id               String            @id @default(cuid())
-  userId           String            @map("user_id")
-  sourceDocumentId String?           @map("source_document_id")
-  resultDocumentId String?           @map("result_document_id")
+  id               String  @id @default(cuid())
+  userId           String  @map("user_id")
+  sourceDocumentId String? @map("source_document_id")
+  resultDocumentId String? @map("result_document_id")
 
   status EnhancementStatus @default(PENDING)
 
   /// cvEnhancementOptionsSchema payload (target role, links, template).
-  options Json
+  options  Json
   /// cvEnhancementDocumentSchema payload once completed.
   document Json?
 
   templateKey String @default("ATS_MINIMAL") @map("template_key")
 
-  creditsCharged Int @default(0) @map("credits_charged")
+  creditsCharged Int     @default(0) @map("credits_charged")
   reservationId  String? @map("reservation_id")
 
   /// Runtime prompt that produced `document` (e.g. JOB_SEEKER_ENHANCE_V1).
@@ -547,9 +623,9 @@ model CvEnhancement {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")
 
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceDocument CvDocument? @relation("EnhancementSourceDocument", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
-  resultDocument CvDocument? @relation("EnhancementResultDocument", fields: [resultDocumentId], references: [id], onDelete: SetNull)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceDocument CvDocument?   @relation("EnhancementSourceDocument", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  resultDocument CvDocument?   @relation("EnhancementResultDocument", fields: [resultDocumentId], references: [id], onDelete: SetNull)
   testimonials   Testimonial[]
 
   @@index([userId, createdAt])
@@ -557,9 +633,15 @@ model CvEnhancement {
   @@map("cv_enhancements")
 }
 
-/* -------------------------------------------------------------------------- */
-/* Recruiter screening                                                         */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Recruiter screening
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model RecruiterPreference {
   id     String @id @default(cuid())
@@ -582,8 +664,8 @@ model RecruiterPreference {
 /// Immutable snapshot of a preference version, so a historical screening result can
 /// always be reproduced even after the recruiter edits their preferences.
 model RecruiterPreferenceVersion {
-  id     String @id @default(cuid())
-  userId String @map("user_id")
+  id      String @id @default(cuid())
+  userId  String @map("user_id")
   version Int
 
   preferences Json
@@ -605,7 +687,7 @@ model ScreeningJob {
   state       ScreeningJobState @default(CREATED)
 
   /// Optional category weights; validated to total 100 when present.
-  categoryWeights Json? @map("category_weights")
+  categoryWeights Json?   @map("category_weights")
   screeningNotes  String? @map("screening_notes")
 
   /// Frozen configuration for reproducibility.
@@ -615,9 +697,9 @@ model ScreeningJob {
   /// Runtime prompt version that produced this job's screening context.
   promptVersion               String @default("HRD_SCREENING_V1") @map("prompt_version")
 
-  totalCandidates      Int @default(0) @map("total_candidates")
-  completedCandidates  Int @default(0) @map("completed_candidates")
-  failedCandidates     Int @default(0) @map("failed_candidates")
+  totalCandidates     Int @default(0) @map("total_candidates")
+  completedCandidates Int @default(0) @map("completed_candidates")
+  failedCandidates    Int @default(0) @map("failed_candidates")
 
   creditsReserved Int @default(0) @map("credits_reserved")
   creditsCharged  Int @default(0) @map("credits_charged")
@@ -632,8 +714,8 @@ model ScreeningJob {
   completedAt DateTime? @map("completed_at")
   cancelledAt DateTime? @map("cancelled_at")
 
-  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reservation CreditReservation?    @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation  CreditReservation?     @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   requirements ScreeningRequirement[]
   candidates   ScreeningCandidate[]
   reports      GeneratedReport[]
@@ -648,16 +730,16 @@ model ScreeningRequirement {
   id    String @id @default(cuid())
   jobId String @map("job_id")
 
-  sortOrder        Int             @map("sort_order")
+  sortOrder        Int              @map("sort_order")
   text             String
   category         ScoringCategory  @default(OTHER)
   requirementClass RequirementClass @default(REQUIRED)
-  weight           Int             @default(10)
-  hardRequirement  Boolean         @default(false) @map("hard_requirement")
+  weight           Int              @default(10)
+  hardRequirement  Boolean          @default(false) @map("hard_requirement")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  job       ScreeningJob             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job       ScreeningJob               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   criterion ScreeningCriterionResult[]
 
   @@unique([jobId, sortOrder])
@@ -669,26 +751,26 @@ model ScreeningCandidate {
   id    String @id @default(cuid())
   jobId String @map("job_id")
 
-  candidateName String  @map("candidate_name")
-  fileName      String  @map("file_name")
-  fileSizeBytes Int     @default(0) @map("file_size_bytes")
+  candidateName String @map("candidate_name")
+  fileName      String @map("file_name")
+  fileSizeBytes Int    @default(0) @map("file_size_bytes")
 
-  state CandidateState @default(QUEUED)
-  attempts Int @default(0)
+  state    CandidateState @default(QUEUED)
+  attempts Int            @default(0)
 
   /// Extracted CV text. Sensitive: belongs to the recruiter's uploaded batch.
   cvText    String? @map("cv_text")
   textHash  String? @map("text_hash")
   pageCount Int     @default(0) @map("page_count")
 
-  score              Int?                @map("score")
-  eligibilityStatus  EligibilityStatus?  @map("eligibility_status")
-  verificationStatus VerificationStatus   @default(NOT_CHECKED) @map("verification_status")
+  score              Int?               @map("score")
+  eligibilityStatus  EligibilityStatus? @map("eligibility_status")
+  verificationStatus VerificationStatus @default(NOT_CHECKED) @map("verification_status")
 
-  summary      String?
-  gaps         Json?
+  summary       String?
+  gaps          Json?
   uncertainties Json?
-  strengths    Json?
+  strengths     Json?
 
   /// Structured worker output kept for auditability and retries.
   analysisJson Json? @map("analysis_json")
@@ -700,9 +782,9 @@ model ScreeningCandidate {
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
 
-  job       ScreeningJob              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  criteria  ScreeningCriterionResult[]
-  evidence  EvidenceItem[]
+  job      ScreeningJob               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  criteria ScreeningCriterionResult[]
+  evidence EvidenceItem[]
 
   @@index([jobId, state])
   @@index([jobId, score])
@@ -710,8 +792,8 @@ model ScreeningCandidate {
 }
 
 model ScreeningCriterionResult {
-  id          String @id @default(cuid())
-  candidateId String @map("candidate_id")
+  id            String @id @default(cuid())
+  candidateId   String @map("candidate_id")
   requirementId String @map("requirement_id")
 
   status             EvidenceStatus
@@ -734,9 +816,9 @@ model ScreeningCriterionResult {
 }
 
 model EvidenceItem {
-  id                String         @id @default(cuid())
-  candidateId       String         @map("candidate_id")
-  criterionResultId String?        @map("criterion_result_id")
+  id                String  @id @default(cuid())
+  candidateId       String  @map("candidate_id")
+  criterionResultId String? @map("criterion_result_id")
 
   /// Short snippet only - never a long copied section.
   quote  String
@@ -757,15 +839,15 @@ model EvidenceItem {
 
 /// Cached external evidence (GitHub / portfolio) attached to a user profile.
 model IntegrationEvidenceSnapshot {
-  id            String              @id @default(cuid())
-  userId        String              @map("user_id")
-  provider      IntegrationProvider
-  sourceUrl     String              @map("source_url")
+  id        String              @id @default(cuid())
+  userId    String              @map("user_id")
+  provider  IntegrationProvider
+  sourceUrl String              @map("source_url")
 
-  status        VerificationStatus  @default(NOT_CHECKED)
+  status        VerificationStatus @default(NOT_CHECKED)
   /// Structured summary returned by the provider adapter.
   payload       Json?
-  failureReason String?             @map("failure_reason")
+  failureReason String?            @map("failure_reason")
 
   fetchedAt DateTime  @default(now()) @map("fetched_at")
   expiresAt DateTime? @map("expires_at")
@@ -777,15 +859,15 @@ model IntegrationEvidenceSnapshot {
 }
 
 model GeneratedReport {
-  id              String       @id @default(cuid())
-  screeningJobId  String       @map("screening_job_id")
-  createdByUserId String?      @map("created_by_user_id")
+  id              String  @id @default(cuid())
+  screeningJobId  String  @map("screening_job_id")
+  createdByUserId String? @map("created_by_user_id")
 
   format   ReportFormat
-  fileName String @map("file_name")
-  mimeType String @map("mime_type")
+  fileName String       @map("file_name")
+  mimeType String       @map("mime_type")
 
-  sizeBytes   Int    @default(0) @map("size_bytes")
+  sizeBytes   Int     @default(0) @map("size_bytes")
   contentHash String? @map("content_hash")
   /// Storage path when Supabase Storage is enabled; null means generated on demand.
   storagePath String? @map("storage_path")
@@ -817,9 +899,15 @@ model ScreeningJobEvent {
   @@map("screening_job_events")
 }
 
-/* -------------------------------------------------------------------------- */
-/* Social proof                                                                */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Social proof
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 model Testimonial {
   id     String @id @default(cuid())
@@ -831,15 +919,15 @@ model Testimonial {
 
   status TestimonialStatus @default(PENDING)
 
-  enhancementId String? @map("enhancement_id")
-  moderatedByUserId String? @map("moderated_by_user_id")
-  moderatedAt DateTime? @map("moderated_at")
+  enhancementId     String?   @map("enhancement_id")
+  moderatedByUserId String?   @map("moderated_by_user_id")
+  moderatedAt       DateTime? @map("moderated_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user            User          @relation("TestimonialAuthor", fields: [userId], references: [id], onDelete: Cascade)
-  moderatedByUser User?         @relation("TestimonialModerator", fields: [moderatedByUserId], references: [id], onDelete: SetNull)
+  user            User           @relation("TestimonialAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  moderatedByUser User?          @relation("TestimonialModerator", fields: [moderatedByUserId], references: [id], onDelete: SetNull)
   enhancement     CvEnhancement? @relation(fields: [enhancementId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])

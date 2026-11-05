@@ -22,8 +22,8 @@ routes/       HTTP paths -> controllers. No business logic, no Prisma.
 controllers/  Parse validated input, call a service, shape the envelope.
 services/     Business rules and transactions (credits, screening, scoring, reports).
   providers/  External systems behind interfaces (AI, payments, PDF, outbound HTTP).
-  queues/     One ScreeningQueue interface: BullMQ+Redis or in-process.
-  workers/    The CandidateProcessor seam and the worker that attaches it.
+  queues/     ScreeningQueue and CvProcessingQueue: BullMQ+Redis or in-process.
+  workers/    Screening and job-seeker CV workers plus their processor seams.
 repositories/ The only modules that touch Prisma.
 ```
 
@@ -32,6 +32,23 @@ Rules that hold everywhere:
 - Validate at the boundary with Zod; validate model output before business logic sees it.
 - External systems sit behind an interface so tests never make a network call.
 - A prompt is never built inside a provider; composition lives in `prompts/`.
+
+## Job-seeker CV pipeline
+
+```
+POST /cv/audit or /cv/enhance       validate PDF -> extract text -> persist document + durable job
+                                    -> reserve quota/credits -> return 202 with job id
+cv-processing queue                 BullMQ when REDIS_URL is set, in-process otherwise
+CV worker                           build prompt -> AIProvider -> Zod -> settle credits
+                                    -> store CvAnalysis/CvEnhancement result
+GET /cv/audits/:auditId             durable QUEUED / PROCESSING / COMPLETED / FAILED status
+GET /cv/enhancements/:id            durable PENDING / PROCESSING / COMPLETED / FAILED status
+```
+
+The upload request owns validation and extraction, but not the model call. The browser stores the
+job id in its URL and polls the status endpoint, so refreshing the page resumes the same work. A
+failed job keeps a client-safe error and releases an unsettled credit hold; a paid result is charged
+only after the worker obtains a validated document.
 
 ## Screening pipeline
 

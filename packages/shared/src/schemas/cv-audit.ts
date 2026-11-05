@@ -101,3 +101,38 @@ export const cvAuditResponseSchema = z.object({
 });
 
 export type CvAuditResponse = z.infer<typeof cvAuditResponseSchema>;
+
+export const CV_AUDIT_JOB_STATUSES = ['QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED'] as const;
+
+export const cvAuditJobFailureSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
+
+export type CvAuditJobFailure = z.infer<typeof cvAuditJobFailureSchema>;
+
+/**
+ * Durable state for an asynchronous audit.
+ *
+ * The result and billing become non-null only after the worker successfully completes the
+ * job. A failed job keeps a client-safe code/message so the UI can explain what happened.
+ */
+export const cvAuditJobSchema = z.object({
+  auditId: z.string(),
+  status: z.enum(CV_AUDIT_JOB_STATUSES),
+  analysisId: z.string().nullable(),
+  result: cvAuditResultSchema.nullable(),
+  billing: cvAuditBillingSchema.nullable(),
+  failure: cvAuditJobFailureSchema.nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+
+export type CvAuditJob = z.infer<typeof cvAuditJobSchema>;
+
+export const cvAuditJobResponseSchema = z.object({
+  audit: cvAuditJobSchema,
+});
+
+export type CvAuditJobResponse = z.infer<typeof cvAuditJobResponseSchema>;

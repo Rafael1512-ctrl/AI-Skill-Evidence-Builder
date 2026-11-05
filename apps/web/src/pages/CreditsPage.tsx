@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 
 import {
-  CREDIT_ECONOMY,
   formatCredits,
   formatDateTimeId,
   formatIdr,
@@ -330,7 +329,6 @@ function TopUpSection() {
       <h2 id="packages-heading" className="text-lg font-medium">
         Paket top-up
       </h2>
-    
 
       {status !== 'signed-in' ? (
         <p className="mt-2 text-sm text-[var(--color-content-muted)]">

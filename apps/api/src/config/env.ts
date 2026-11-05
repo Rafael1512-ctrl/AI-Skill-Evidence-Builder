@@ -67,6 +67,8 @@ const envSchema = z.object({
   REDIS_URL: optionalString,
   SCREENING_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   SCREENING_JOB_BACKOFF_MS: z.coerce.number().int().min(100).max(120_000).default(2_000),
+  CV_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  CV_JOB_BACKOFF_MS: z.coerce.number().int().min(100).max(120_000).default(2_000),
 
   MAX_PDF_BYTES: z.coerce
     .number()

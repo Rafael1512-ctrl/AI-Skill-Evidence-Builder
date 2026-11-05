@@ -1,4 +1,6 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   cvAnalysisDetailSchema,
@@ -76,10 +78,15 @@ export function useAuditDetailQuery(analysisId: string) {
  */
 export function useEnhancementDetailQuery(enhancementId: string) {
   const { token, status } = useAuth();
+  const queryClient = useQueryClient();
 
-  return useQuery({
+  const query = useQuery({
     queryKey: [...cvHistoryQueryKey(token), 'enhancement', enhancementId],
-    enabled: status === 'signed-in' && token !== null,
+    enabled: status === 'signed-in' && token !== null && enhancementId.length > 0,
+    refetchInterval: (query) => {
+      const enhancementStatus = query.state.data?.status;
+      return enhancementStatus === 'PENDING' || enhancementStatus === 'PROCESSING' ? 1_500 : false;
+    },
     queryFn: async () => {
       const response = await apiRequest(
         `/api/cv/enhancements/${encodeURIComponent(enhancementId)}`,
@@ -88,4 +95,18 @@ export function useEnhancementDetailQuery(enhancementId: string) {
       return response.enhancement;
     },
   });
+
+  useEffect(() => {
+    const currentStatus = query.data?.status;
+    if (
+      currentStatus !== 'COMPLETED' &&
+      currentStatus !== 'FAILED' &&
+      currentStatus !== 'REFUNDED'
+    ) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: cvHistoryQueryKey(token) });
+  }, [query.data?.status, queryClient, token]);
+
+  return query;
 }

@@ -1,19 +1,22 @@
 import { useId, useState, type ChangeEvent, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { LIMITS, formatDateTimeId, formatNumber } from '@aseb/shared';
 
 import { AuditResultView } from '../components/AuditResultView.js';
 import { ApiError } from '../lib/api.js';
-import { useAuditCvMutation, useAuditUsageQuery } from '../lib/cvAudit.js';
+import { useAuditCvMutation, useAuditJobQuery, useAuditUsageQuery } from '../lib/cvAudit.js';
 
 const MAX_PDF_MB = Math.round(LIMITS.MAX_PDF_BYTES / (1024 * 1024));
 
 export function AuditPage() {
   const fileInputId = useId();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const auditId = searchParams.get('auditId');
   const [file, setFile] = useState<File | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const audit = useAuditCvMutation();
+  const job = useAuditJobQuery(auditId);
   const usage = useAuditUsageQuery();
   const paidOnly = usage.data?.freeAuditsRemaining === 0;
   const insufficientCredits =
@@ -46,12 +49,30 @@ export function AuditPage() {
       return;
     }
     setLocalError(null);
-    audit.mutate(file);
+    audit.mutate(file, {
+      onSuccess: (created) => {
+        setFile(null);
+        const next = new URLSearchParams(searchParams);
+        next.set('auditId', created.auditId);
+        setSearchParams(next);
+      },
+    });
   }
 
-  const errorMessage = localError ?? (audit.isError ? audit.error.message : null);
+  const activeJob =
+    job.data?.status === 'QUEUED' || job.data?.status === 'PROCESSING' ? job.data : null;
+  const errorMessage =
+    localError ??
+    (audit.isError ? audit.error.message : null) ??
+    (job.isError ? job.error.message : null) ??
+    job.data?.failure?.message ??
+    null;
   const errorHint =
-    !localError && audit.error instanceof ApiError ? `Kode: ${audit.error.code}` : null;
+    !localError && audit.error instanceof ApiError
+      ? `Kode: ${audit.error.code}`
+      : job.data?.failure
+        ? `Kode: ${job.data.failure.code}`
+        : null;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -65,7 +86,6 @@ export function AuditPage() {
           hari. Setelah kuota habis, audit berikutnya memakai kredit sesuai harga yang berlaku. AI
           hanya membaca isi CV Anda — tidak ada pengalaman, keahlian, atau angka yang ditambahkan.
         </p>
-       
       </div>
 
       <section
@@ -119,16 +139,16 @@ export function AuditPage() {
           type="file"
           accept="application/pdf,.pdf"
           onChange={handleFileChange}
-          className="text-sm"
+          className="w-full cursor-pointer rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-[var(--color-surface-muted)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-content)] file:transition-colors hover:file:bg-[var(--color-border-subtle)]"
         />
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={audit.isPending}
+            disabled={audit.isPending || activeJob !== null}
             className="rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)] disabled:opacity-60"
           >
-            {audit.isPending
-              ? 'Menganalisis…'
+            {audit.isPending || activeJob
+              ? 'Audit sedang diproses…'
               : paidOnly && usage.data
                 ? `Audit CV · ${formatNumber(usage.data.paidAuditCredits)} Kredit`
                 : 'Audit CV'}
@@ -155,17 +175,29 @@ export function AuditPage() {
 
       {audit.isPending ? (
         <p className="text-sm text-[var(--color-content-muted)]">
-          Sedang membaca dan menilai struktur CV Anda…
+          Mengunggah dan menyiapkan audit…
         </p>
       ) : null}
 
-      {audit.data ? (
+      {job.isPending && auditId ? (
+        <p className="text-sm text-[var(--color-content-muted)]">Memuat status audit…</p>
+      ) : null}
+
+      {activeJob ? (
+        <p className="text-sm text-[var(--color-content-muted)]">
+          {activeJob.status === 'QUEUED'
+            ? 'Audit menunggu antrean. Halaman ini dapat di-refresh; proses tetap berjalan.'
+            : 'Audit sedang berjalan di latar belakang. Halaman ini dapat di-refresh.'}
+        </p>
+      ) : null}
+
+      {job.data?.status === 'COMPLETED' && job.data.result && job.data.billing ? (
         <>
-          <AuditResultView result={audit.data.result} />
+          <AuditResultView result={job.data.result} />
           <p className="text-sm text-[var(--color-content-muted)]">
-            {audit.data.billing.mode === 'FREE'
-              ? `Audit ini memakai kuota gratis (${audit.data.billing.freeAuditsUsed}/${audit.data.billing.freeAuditsLimit} hari ini).`
-              : `Audit ini memakai ${formatNumber(audit.data.billing.creditsCharged)} kredit.`}
+            {job.data.billing.mode === 'FREE'
+              ? `Audit ini memakai kuota gratis (${job.data.billing.freeAuditsUsed}/${job.data.billing.freeAuditsLimit} hari ini).`
+              : `Audit ini memakai ${formatNumber(job.data.billing.creditsCharged)} kredit.`}
           </p>
         </>
       ) : null}

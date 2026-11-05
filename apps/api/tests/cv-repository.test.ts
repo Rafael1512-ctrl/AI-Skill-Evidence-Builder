@@ -159,7 +159,7 @@ describe('CvRepository', () => {
     expect(found?.creditsCharged).toBe(2);
   });
 
-  it('tracks an enhancement from PROCESSING to COMPLETED', async () => {
+  it('tracks an enhancement from PENDING to COMPLETED', async () => {
     const source = await createDocument();
     const enhancement = await repository.createEnhancement({
       userId,
@@ -170,7 +170,7 @@ describe('CvRepository', () => {
       promptVersion: 'JOB_SEEKER_ENHANCE_V1',
     });
 
-    expect(enhancement.status).toBe('PROCESSING');
+    expect(enhancement.status).toBe('PENDING');
     expect(enhancement.options).toMatchObject({ targetRole: 'Backend Engineer' });
     expect(enhancement.promptVersion).toBe('JOB_SEEKER_ENHANCE_V1');
 
@@ -201,7 +201,7 @@ describe('CvRepository', () => {
 
     const page = await repository.listEnhancements(userId, 0, 10);
     expect(page.total).toBe(2);
-    expect(page.items.every((item) => item.status === 'PROCESSING')).toBe(true);
+    expect(page.items.every((item) => item.status === 'PENDING')).toBe(true);
   });
 
   it('cascades documents, analyses and enhancements when a user is deleted', async () => {

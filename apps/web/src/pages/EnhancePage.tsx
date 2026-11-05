@@ -1,5 +1,5 @@
 import { useId, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import {
   CV_TEMPLATES,
@@ -14,6 +14,7 @@ import { ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.js';
 import { usePricingQuery } from '../lib/credits.js';
 import { useEnhanceCvMutation } from '../lib/cvEnhance.js';
+import { useEnhancementDetailQuery } from '../lib/cvHistory.js';
 import { TestimonialForm } from './TestimonialsPage.js';
 
 const MAX_PDF_MB = Math.round(LIMITS.MAX_PDF_BYTES / (1024 * 1024));
@@ -79,10 +80,13 @@ const inputClass =
 
 function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
   const prefix = useId();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const enhancementId = searchParams.get('enhancementId');
   const [file, setFile] = useState<File | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [form, setForm] = useState<EnhanceForm>(() => initialForm(profile));
   const enhance = useEnhanceCvMutation();
+  const detail = useEnhancementDetailQuery(enhancementId ?? '');
   const pricing = usePricingQuery();
 
   const price = pricing.data?.find((entry) => entry.feature === 'CV_ENHANCEMENT');
@@ -128,10 +132,30 @@ function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
       ...(form.additionalNotes.trim() ? { additionalNotes: form.additionalNotes.trim() } : {}),
     };
 
-    enhance.mutate({ file, options });
+    enhance.mutate(
+      { file, options },
+      {
+        onSuccess: ({ id }) => {
+          setFile(null);
+          const next = new URLSearchParams(searchParams);
+          next.set('enhancementId', id);
+          setSearchParams(next);
+        },
+      },
+    );
   }
 
-  const errorMessage = localError ?? (enhance.isError ? enhance.error.message : null);
+  const currentEnhancement = detail.data ?? enhance.data ?? null;
+  const activeJob =
+    currentEnhancement?.status === 'PENDING' || currentEnhancement?.status === 'PROCESSING'
+      ? currentEnhancement
+      : null;
+  const errorMessage =
+    localError ??
+    (enhance.isError ? enhance.error.message : null) ??
+    (detail.isError ? detail.error.message : null) ??
+    detail.data?.failureReason ??
+    null;
   const errorHint =
     !localError && enhance.error instanceof ApiError ? `Kode: ${enhance.error.code}` : null;
   const shortOnCredits =
@@ -149,7 +173,6 @@ function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
           keahlian, angka, atau tanggal yang tidak ada di CV Anda. Setiap poin yang berasal dari CV
           menyertakan kutipan sumbernya.
         </p>
-
       </div>
 
       <form
@@ -162,7 +185,7 @@ function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
             type="file"
             accept="application/pdf,.pdf"
             onChange={handleFileChange}
-            className="text-sm"
+            className="w-full cursor-pointer rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-[var(--color-surface-muted)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-content)] file:transition-colors hover:file:bg-[var(--color-border-subtle)]"
           />
         </Field>
 
@@ -273,10 +296,10 @@ function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={enhance.isPending}
+            disabled={enhance.isPending || activeJob !== null}
             className="rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)] disabled:opacity-60"
           >
-            {enhance.isPending ? 'Menyempurnakan…' : 'Sempurnakan CV'}
+            {enhance.isPending || activeJob ? 'Sedang diproses…' : 'Sempurnakan CV'}
           </button>
           <span className="text-xs text-[var(--color-content-muted)]">
             {priceLabel} · dipotong hanya jika berhasil
@@ -303,14 +326,30 @@ function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
 
       {enhance.isPending ? (
         <p className="text-sm text-[var(--color-content-muted)]">
-          Menyusun ulang CV Anda tanpa menambah fakta…
+          Mengunggah dan menyiapkan peningkatan CV…
         </p>
       ) : null}
 
-      {enhance.data ? <EnhancementResultView enhancement={enhance.data} /> : null}
+      {detail.isPending && enhancementId ? (
+        <p className="text-sm text-[var(--color-content-muted)]">Memuat status peningkatan…</p>
+      ) : null}
+
+      {activeJob ? (
+        <p className="text-sm text-[var(--color-content-muted)]">
+          {activeJob.status === 'PENDING'
+            ? 'Peningkatan CV menunggu antrean. Halaman ini dapat di-refresh; proses tetap berjalan.'
+            : 'Peningkatan CV sedang berjalan di latar belakang. Halaman ini dapat di-refresh.'}
+        </p>
+      ) : null}
+
+      {detail.data?.status === 'COMPLETED' ? (
+        <EnhancementResultView enhancement={detail.data} />
+      ) : null}
 
       {/* Social proof tied to this finished result; the API keeps it private until moderated. */}
-      {enhance.data ? <TestimonialForm enhancementId={enhance.data.id} /> : null}
+      {detail.data?.status === 'COMPLETED' ? (
+        <TestimonialForm enhancementId={detail.data.id} />
+      ) : null}
 
       <Link
         to="/enhance/history"

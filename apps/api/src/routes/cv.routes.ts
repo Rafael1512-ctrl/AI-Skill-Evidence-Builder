@@ -12,6 +12,7 @@ import {
   enhanceCv,
   exportEnhancement,
   getAnalysis,
+  getAuditJob,
   getAuditUsage,
   getEnhancement,
   getHistory,
@@ -38,6 +39,12 @@ cvRouter.get('/templates', listTemplates);
 cvRouter.get('/audit/usage', requireAuth(), getAuditUsage);
 
 cvRouter.post('/audit', requireAuth(), uploadSinglePdf, auditCv);
+cvRouter.get(
+  '/audits/:auditId',
+  requireAuth(),
+  validate({ params: z.object({ auditId: z.string().min(1).max(64) }) }),
+  getAuditJob,
+);
 
 cvRouter.get('/history', requireAuth(), validate({ query: paginationQuerySchema }), getHistory);
 
