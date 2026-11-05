@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -9,17 +8,15 @@ import {
   FileText,
   Plus,
   Sparkles,
-  Trash2,
   UserRound,
 } from 'lucide-react';
 
 import { formatCredits, formatDateTimeId } from '@aseb/shared';
 
-import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { useAuth } from '../lib/auth.js';
 import { useWalletQuery } from '../lib/credits.js';
 import { useAuditUsageQuery } from '../lib/cvAudit.js';
-import { useCvHistoryQuery, useDeleteCvDocumentMutation } from '../lib/cvHistory.js';
+import { useCvHistoryQuery } from '../lib/cvHistory.js';
 
 const ENHANCEMENT_LABELS = {
   PENDING: 'Menunggu',
@@ -112,8 +109,6 @@ export function JobSeekerDashboardPage() {
   const wallet = useWalletQuery();
   const usage = useAuditUsageQuery();
   const history = useCvHistoryQuery();
-  const removeDocument = useDeleteCvDocumentMutation();
-  const [documentToDelete, setDocumentToDelete] = useState<string | null>(null);
 
   const activities = [
     ...(history.data?.analyses.map((analysis) => ({
@@ -122,7 +117,7 @@ export function JobSeekerDashboardPage() {
       detail: `Skor ATS ${analysis.atsScore}/100 · ${analysis.provider}`,
       createdAt: analysis.createdAt,
       kind: 'analysis' as const,
-      documentId: analysis.documentId,
+      detailPath: `/audit/history/${analysis.id}`,
       state: 'Selesai',
     })) ?? []),
     ...(history.data?.enhancements.map((enhancement) => ({
@@ -131,7 +126,7 @@ export function JobSeekerDashboardPage() {
       detail: `${enhancement.templateKey} · ${enhancement.creditsCharged} kredit`,
       createdAt: enhancement.createdAt,
       kind: 'enhancement' as const,
-      documentId: enhancement.sourceDocumentId,
+      detailPath: `/enhance/history/${enhancement.id}`,
       state: ENHANCEMENT_LABELS[enhancement.status],
     })) ?? []),
   ].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
@@ -236,7 +231,7 @@ export function JobSeekerDashboardPage() {
           <div>
             <h2 className="text-lg font-semibold">Aktivitas CV terbaru</h2>
             <p className="mt-1 text-sm text-[var(--color-content-muted)]">
-              Baca riwayat dan hapus data CV yang sudah tidak diperlukan.
+              Buka detail setiap audit dan peningkatan CV Anda.
             </p>
           </div>
           <Link to="/audit" className="text-sm font-medium text-violet-600 dark:text-violet-300">
@@ -276,10 +271,10 @@ export function JobSeekerDashboardPage() {
               <thead className="bg-[var(--color-surface-muted)] text-xs text-[var(--color-content-muted)] uppercase">
                 <tr>
                   <th className="px-5 py-3 font-medium">Aktivitas</th>
-                  <th className="px-5 py-3 font-medium">Detail</th>
+                  <th className="px-5 py-3 font-medium">Keterangan</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 font-medium">Tanggal</th>
-                  <th className="px-5 py-3 text-right font-medium">Aksi</th>
+                  <th className="px-5 py-3 text-right font-medium">Detail</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -311,19 +306,13 @@ export function JobSeekerDashboardPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      {activity.documentId ? (
-                        <button
-                          type="button"
-                          aria-label={`Hapus ${activity.title}`}
-                          onClick={() => setDocumentToDelete(activity.documentId)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-danger)] hover:border-[var(--color-danger)]"
-                        >
-                          <Trash2 aria-hidden className="h-3.5 w-3.5" />
-                          Hapus
-                        </button>
-                      ) : (
-                        <span className="text-xs text-[var(--color-content-muted)]">—</span>
-                      )}
+                      <Link
+                        to={activity.detailPath}
+                        aria-label={`Detail ${activity.title}, ${formatDateTimeId(activity.createdAt)}`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs font-medium hover:border-violet-400"
+                      >
+                        Detail <ArrowRight aria-hidden className="h-3.5 w-3.5" />
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -332,30 +321,6 @@ export function JobSeekerDashboardPage() {
           </div>
         ) : null}
       </section>
-
-      <ConfirmDialog
-        open={documentToDelete !== null}
-        title="Hapus data CV?"
-        confirmLabel="Hapus permanen"
-        busy={removeDocument.isPending}
-        onCancel={() => setDocumentToDelete(null)}
-        onConfirm={() => {
-          if (!documentToDelete) return;
-          removeDocument.mutate(documentToDelete, {
-            onSuccess: () => setDocumentToDelete(null),
-          });
-        }}
-      >
-        <p>
-          File dan teks CV ini akan dihapus dari data aktif. Riwayat analisis tetap tersimpan tanpa
-          teks sumbernya.
-        </p>
-        {removeDocument.isError ? (
-          <p role="alert" className="text-[var(--color-danger)]">
-            {removeDocument.error.message}
-          </p>
-        ) : null}
-      </ConfirmDialog>
     </div>
   );
 }

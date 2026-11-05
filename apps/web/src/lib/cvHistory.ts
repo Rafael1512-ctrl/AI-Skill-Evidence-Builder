@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import {
   cvAnalysisDetailSchema,
@@ -7,7 +7,7 @@ import {
   type CvHistoryResponse,
 } from '@aseb/shared';
 
-import { apiRequest, apiRequestNoContent } from './api.js';
+import { apiRequest } from './api.js';
 import { useAuth } from './auth.js';
 
 export function cvHistoryQueryKey(token: string | null) {
@@ -86,23 +86,6 @@ export function useEnhancementDetailQuery(enhancementId: string) {
         { token, schema: cvEnhancementResponseSchema },
       );
       return response.enhancement;
-    },
-  });
-}
-
-/** Deletes the stored source CV and cascades its analyses. */
-export function useDeleteCvDocumentMutation() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-
-  return useMutation<void, Error, string>({
-    mutationFn: (documentId) =>
-      apiRequestNoContent(`/api/cv/documents/${documentId}`, {
-        method: 'DELETE',
-        token,
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: cvHistoryQueryKey(token) });
     },
   });
 }

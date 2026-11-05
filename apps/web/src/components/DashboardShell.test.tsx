@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '../lib/auth.js';
-import { DashboardShell } from './DashboardShell.js';
+import { DashboardShell, WorkspaceShell } from './DashboardShell.js';
 
 const PROFILE = {
   id: 'user-1',
@@ -95,5 +95,25 @@ describe('DashboardShell', () => {
     );
     expect(await screen.findByText('18 Kredit')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['/profile', 'Workspace Pencari Kerja'],
+    ['/profile?workspace=hrd', 'Workspace HRD'],
+  ])('opens a shared page at %s in the matching workspace', async (path, label) => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <WorkspaceShell>
+              <h1>Profil</h1>
+            </WorkspaceShell>
+          </MemoryRouter>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(label)).toBeInTheDocument();
   });
 });

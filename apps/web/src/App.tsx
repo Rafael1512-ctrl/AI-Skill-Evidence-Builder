@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 
-import { DashboardShell } from './components/DashboardShell.js';
+import { CreditsRoute } from './components/CreditsRoute.js';
+import { DashboardShell, WorkspaceShell } from './components/DashboardShell.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { AuthProvider } from './lib/auth.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AuditDetailPage } from './pages/AuditDetailPage.js';
 import { AuditHistoryPage } from './pages/AuditHistoryPage.js';
 import { AuditPage } from './pages/AuditPage.js';
-import { CreditsPage } from './pages/CreditsPage.js';
 import { EnhancementDetailPage } from './pages/EnhancementDetailPage.js';
 import { EnhancementHistoryPage } from './pages/EnhancementHistoryPage.js';
 import { EnhancePage } from './pages/EnhancePage.js';
@@ -106,7 +106,7 @@ export function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/credits" element={<CreditsPage />} />
+            <Route path="/credits" element={<CreditsRoute />} />
             <Route path="/testimonials" element={<TestimonialsPage />} />
             <Route
               path="/admin"
@@ -150,7 +150,9 @@ export function App() {
               path="/profile"
               element={
                 <ProtectedRoute>
-                  <ProfilePage />
+                  <WorkspaceShell>
+                    <ProfilePage />
+                  </WorkspaceShell>
                 </ProtectedRoute>
               }
             />

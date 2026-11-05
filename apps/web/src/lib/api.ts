@@ -98,35 +98,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions<T>)
   return parseResponse(response, options.schema);
 }
 
-/** A JSON request whose successful response has no body (`204 No Content`). */
-export async function apiRequestNoContent(
-  path: string,
-  options: Pick<ApiRequestOptions<never>, 'method' | 'token' | 'signal'>,
-): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (options.token) headers.authorization = `Bearer ${options.token}`;
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: options.method ?? 'DELETE',
-    headers,
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
-
-  if (response.ok) return;
-
-  const raw: unknown = await response.json().catch(() => null);
-  const parsed = apiErrorBodySchema.safeParse(raw);
-  if (parsed.success) {
-    throw new ApiError(
-      parsed.data.error.code,
-      parsed.data.error.message,
-      response.status,
-      parsed.data.error.details,
-    );
-  }
-  throw new ApiError('UNKNOWN_ERROR', 'Terjadi kesalahan pada server.', response.status);
-}
-
 export interface ApiUploadManyOptions<T> {
   files: readonly File[];
   /** Multipart field name every file is appended under (the batch API expects `files`). */

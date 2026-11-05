@@ -152,6 +152,8 @@ returned to a client. Only the prompt **version id** is exposed where useful for
 ## 6. Job seeker runtime context
 
 Supplied only when given by the user in the current request or previously saved **with consent**.
+The enhance form prefills saved links as visible, editable defaults, so a link it sends counts as
+given in the current request; the user can change or clear it before submitting.
 The builder emits it as JSON, defaults omitted:
 
 ```jsonc

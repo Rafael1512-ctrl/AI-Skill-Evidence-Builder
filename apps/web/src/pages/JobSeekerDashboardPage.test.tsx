@@ -55,7 +55,7 @@ describe('JobSeekerDashboardPage', () => {
   beforeEach(() => {
     window.localStorage.setItem('aseb.access-token', 'test-token');
     fetchMock.mockReset();
-    fetchMock.mockImplementation(async (input: unknown, init?: RequestInit) => {
+    fetchMock.mockImplementation(async (input: unknown) => {
       const url = String(input);
       if (url.startsWith('/api/profile')) {
         return jsonResponse({
@@ -123,9 +123,6 @@ describe('JobSeekerDashboardPage', () => {
           },
         });
       }
-      if (url === '/api/cv/documents/doc-1' && init?.method === 'DELETE') {
-        return jsonResponse(null, 204);
-      }
       return jsonResponse({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -149,17 +146,19 @@ describe('JobSeekerDashboardPage', () => {
     expect(screen.getByRole('link', { name: /audit cv baru/i })).toHaveAttribute('href', '/audit');
   });
 
-  it('deletes a stored CV document after confirmation', async () => {
-    const { user } = renderDashboard();
+  it('opens each activity from its detail link and offers no delete', async () => {
+    renderDashboard();
 
-    await user.click(await screen.findByRole('button', { name: 'Hapus Audit CV gratis' }));
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Hapus data CV?');
-    await user.click(screen.getByRole('button', { name: 'Hapus permanen' }));
-
-    const deletion = fetchMock.mock.calls.find(
-      ([url, init]) =>
-        url === '/api/cv/documents/doc-1' && (init as RequestInit | undefined)?.method === 'DELETE',
+    expect(await screen.findByRole('columnheader', { name: 'Detail' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /detail audit cv gratis/i })).toHaveAttribute(
+      'href',
+      '/audit/history/audit-1',
     );
-    expect(deletion).toBeDefined();
+    expect(screen.getByRole('link', { name: /detail peningkatan cv/i })).toHaveAttribute(
+      'href',
+      '/enhance/history/enh-1',
+    );
+    expect(screen.queryByRole('columnheader', { name: 'Aksi' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hapus/i })).not.toBeInTheDocument();
   });
 });

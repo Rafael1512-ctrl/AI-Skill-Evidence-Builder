@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 
 import { ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/auth.js';
@@ -64,7 +63,7 @@ function Field({ id, label, value, onChange, type = 'text', placeholder }: Field
  * context and can never be changed from here. Emptying a field clears it server-side.
  */
 export function ProfilePage() {
-  const { profile, googleLink, signOut, authError } = useAuth();
+  const { profile, googleLink, authError } = useAuth();
   const updateProfile = useUpdateProfileMutation();
   const connectGoogle = useConnectGoogleMutation();
 
@@ -132,36 +131,12 @@ export function ProfilePage() {
   const googleCanLink = Boolean(googleLink?.supported) && googleReady;
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-8 px-6 py-16">
-      {/* At the top on purpose: this page is long and sits outside the dashboard shell. */}
-      <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke beranda
-      </Link>
-
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Profil</h1>
-          <p className="mt-1 text-sm text-[var(--color-content-muted)]">
-            {profile?.email} · {profile?.role === 'ADMIN' ? 'Administrator' : 'Pengguna'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/credits"
-            className="rounded-lg border border-[var(--color-border-subtle)] px-4 py-2 text-sm font-medium"
-          >
-            Kredit
-          </Link>
-          <button
-            type="button"
-            onClick={() => {
-              void signOut();
-            }}
-            className="rounded-lg border border-[var(--color-border-subtle)] px-4 py-2 text-sm font-medium"
-          >
-            Keluar
-          </button>
-        </div>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
+      <header>
+        <h1 className="text-3xl font-semibold tracking-tight">Profil</h1>
+        <p className="mt-1 text-sm text-[var(--color-content-muted)]">
+          {profile?.email} · {profile?.role === 'ADMIN' ? 'Administrator' : 'Pengguna'}
+        </p>
       </header>
 
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
@@ -281,6 +256,6 @@ export function ProfilePage() {
           </p>
         ) : null}
       </section>
-    </main>
+    </div>
   );
 }

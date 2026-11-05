@@ -330,10 +330,7 @@ function TopUpSection() {
       <h2 id="packages-heading" className="text-lg font-medium">
         Paket top-up
       </h2>
-      <p className="mt-1 text-sm text-[var(--color-content-muted)]">
-        Minimum top-up {formatIdr(CREDIT_ECONOMY.MIN_TOPUP_IDR)}. Satu kredit setara{' '}
-        {formatIdr(CREDIT_ECONOMY.CREDIT_IDR_VALUE)}. Tanpa langganan.
-      </p>
+    
 
       {status !== 'signed-in' ? (
         <p className="mt-2 text-sm text-[var(--color-content-muted)]">
@@ -542,15 +539,19 @@ function TransactionHistory() {
  * only for top-up packages, because credits are the only unit users spend.
  */
 export function CreditsPage() {
+  const { status } = useAuth();
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
       <header>
-        {/* At the top on purpose: this page is long, and a way back at the bottom would be out of
-            reach from the top-up panel. The other pages put the same link last. */}
-        <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
-          ← Kembali ke beranda
-        </Link>
-        <h1 className="mt-4 text-3xl font-semibold tracking-tight">Kredit &amp; Harga</h1>
+        {/* Guests have no dashboard shell, so this is their way back. It sits at the top because
+            the page is long, and a link at the bottom would be out of reach from the top-up panel. */}
+        {status === 'signed-in' ? null : (
+          <Link to="/" className="mb-4 inline-block text-sm font-medium text-[var(--color-brand)]">
+            ← Kembali ke beranda
+          </Link>
+        )}
+        <h1 className="text-3xl font-semibold tracking-tight">Kredit &amp; Harga</h1>
         <p className="mt-1 text-sm text-[var(--color-content-muted)]">
           Satu dompet kredit untuk pencarian kerja dan rekrutmen. Tanpa langganan.
         </p>
@@ -561,6 +562,6 @@ export function CreditsPage() {
       <TopUpSection />
       <PaymentHistorySection />
       <TransactionHistory />
-    </main>
+    </div>
   );
 }

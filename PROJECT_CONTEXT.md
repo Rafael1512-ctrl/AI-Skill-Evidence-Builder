@@ -1546,7 +1546,7 @@ dev:worker` plus one uploaded batch is enough.
     explains the product, shows a code-native dashboard preview and asks the visitor to choose Job
     Seeker or HRD before login. Both dashboards are ordinary protected pages for any signed-in
     account; switching workspace never changes the wallet or account role. Job Seeker receives a
-    CRUD-style summary over stored audits/enhancements and can soft-delete source documents. HRD
+    summary over stored audits/enhancements with a read-only Detail link per activity (§8.68). HRD
     receives screening metrics, recent sessions and the existing create/read/cancel/report flow.
     The admin navigation link was removed from every public/user surface, so `/admin` must be typed
     directly and remains guarded by the server. No raster asset generator was available in this
@@ -1564,6 +1564,23 @@ dev:worker` plus one uploaded batch is enough.
     processing, so the detail shows a status notice instead of a result and never surfaces the
     internal `failureReason`. `getEnhancement` now reads the source through the relation, so a
     deleted CV keeps its file name and returns empty `originalText`. No schema change was needed.
+68. **Dashboard activity is read-only** (2026-11-05, changed by owner request). The Job Seeker
+    activity table replaced its delete action with a Detail column that opens
+    `/audit/history/:id` or `/enhance/history/:id`, and the HRD table renamed Aksi to Detail. The
+    web delete hook and `apiRequestNoContent` were removed as unused. `DELETE
+    /api/cv/documents/:documentId` and its soft-delete behaviour remain in the API, so the web app
+    currently gives users no way to delete a stored CV.
+69. **Credits page inside the dashboard** (2026-11-05, changed by owner request). `CreditsRoute`
+    renders `/credits` inside `DashboardShell` for signed-in accounts and as a plain public page for
+    guests. Both workspaces share the route: the shell links to `/credits?workspace=hrd` from HRD,
+    and any other entry, including the landing page and the Midtrans finish URL
+    (`${FRONTEND_URL}/credits`), opens the Job Seeker workspace.
+70. **Profile inside the dashboard, saved links prefill the enhance form** (2026-11-05, changed by
+    owner request). `/profile` uses `WorkspaceShell` the same way, and its own home, credits and
+    sign-out controls were removed because the shell provides them. `EnhancePage` starts the
+    LinkedIn, GitHub and portfolio fields from the saved profile. Those fields are sent as links
+    supplied in the request, independently of `useProfileContext`, so the consent text now names
+    only the name, headline and location and tells the user to clear a link they do not want used.
 
 ---
 

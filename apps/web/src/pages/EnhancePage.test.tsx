@@ -246,6 +246,84 @@ describe('EnhancePage', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/cv/enhance'))).toBe(false);
   });
 
+  describe('links saved on the profile', () => {
+    function mockProfileLinks(onSubmit: (body: FormData) => void) {
+      window.localStorage.setItem('aseb.access-token', 'test-token');
+      fetchMock.mockImplementation(async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/profile')) {
+          return jsonResponse({
+            data: {
+              profile: {
+                ...PROFILE,
+                linkedinUrl: 'https://www.linkedin.com/in/siti',
+                githubUrl: 'https://github.com/siti',
+              },
+              googleLink: { supported: false, reason: null, method: null, redirectTo: null },
+            },
+          });
+        }
+        if (url.startsWith('/api/credits/pricing')) return jsonResponse({ data: PRICING });
+        onSubmit(init?.body as FormData);
+        return jsonResponse({ data: { enhancement: ENHANCEMENT } }, 201);
+      });
+    }
+
+    async function submit(user: ReturnType<typeof userEvent.setup>) {
+      await user.upload(
+        screen.getByLabelText(/berkas cv \(pdf/i),
+        new File(['%PDF-1.4'], 'cv.pdf', { type: 'application/pdf' }),
+      );
+      await user.click(screen.getByRole('button', { name: /sempurnakan cv/i }));
+      await screen.findByText(/sebelum — cv yang anda unggah/i);
+    }
+
+    function optionsOf(body: FormData | null): Record<string, unknown> {
+      return JSON.parse(String(body?.get('options'))) as Record<string, unknown>;
+    }
+
+    it('fills them as defaults and sends them, leaving empty ones empty', async () => {
+      let submitted: FormData | null = null;
+      mockProfileLinks((body) => {
+        submitted = body;
+      });
+      const { user } = renderEnhance();
+
+      expect(await screen.findByLabelText('LinkedIn')).toHaveValue(
+        'https://www.linkedin.com/in/siti',
+      );
+      expect(screen.getByLabelText('GitHub')).toHaveValue('https://github.com/siti');
+      expect(screen.getByLabelText('Portofolio')).toHaveValue('');
+
+      await submit(user);
+
+      const options = optionsOf(submitted);
+      expect(options.linkedinUrl).toBe('https://www.linkedin.com/in/siti');
+      expect(options.githubUrl).toBe('https://github.com/siti');
+      expect(options).not.toHaveProperty('portfolioUrl');
+    });
+
+    it('sends what the user changed and drops what the user cleared', async () => {
+      let submitted: FormData | null = null;
+      mockProfileLinks((body) => {
+        submitted = body;
+      });
+      const { user } = renderEnhance();
+
+      const linkedin = await screen.findByLabelText('LinkedIn');
+      await user.clear(linkedin);
+      const github = screen.getByLabelText('GitHub');
+      await user.clear(github);
+      await user.type(github, 'https://github.com/siti-baru');
+
+      await submit(user);
+
+      const options = optionsOf(submitted);
+      expect(options).not.toHaveProperty('linkedinUrl');
+      expect(options.githubUrl).toBe('https://github.com/siti-baru');
+    });
+  });
+
   it('sends an explicit consent flag only when the user opts in', async () => {
     window.localStorage.setItem('aseb.access-token', 'test-token');
     let submitted: FormData | null = null;

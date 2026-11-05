@@ -89,10 +89,11 @@ only a UX decision and is never treated as authorization.
 
 ## 3. Privacy
 
-- CV audits require an account and are persisted so the result can be opened from history;
-  users can delete a stored document.
+- CV audits require an account and are persisted so the result can be opened from history. The
+  owner-scoped `DELETE /api/cv/documents/:documentId` route exists, but the web app no longer
+  offers it.
 - Signed-in CV text is stored because the product needs it (enhancement, screening evidence,
-  reproducibility); users can delete a stored document, which cascades.
+  reproducibility).
 - Screening batches belong to the recruiter's account and are scoped to it on every read.
 - The AI never infers protected attributes, and no feature uses them for scoring or summaries
   (`prompts/global/*`, `docs/AI_PROMPTS.md` §11).

@@ -42,8 +42,11 @@ export function AuditDetailPage() {
 
       {detail.data ? <AuditResultView result={detail.data.result} /> : null}
 
-      <Link to="/audit/history" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke riwayat audit
+      <Link to="/audit/history" 
+        className="w-fit rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)]"
+      >
+        Kembali ke riwayat audit
+        
       </Link>
     </div>
   );

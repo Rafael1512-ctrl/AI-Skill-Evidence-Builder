@@ -65,12 +65,7 @@ export function AuditPage() {
           hari. Setelah kuota habis, audit berikutnya memakai kredit sesuai harga yang berlaku. AI
           hanya membaca isi CV Anda — tidak ada pengalaman, keahlian, atau angka yang ditambahkan.
         </p>
-        <Link
-          to="/audit/history"
-          className="mt-3 inline-block text-sm font-medium text-[var(--color-brand)]"
-        >
-          Lihat riwayat audit →
-        </Link>
+       
       </div>
 
       <section
@@ -181,9 +176,11 @@ export function AuditPage() {
           Sempurnakan CV
         </Link>
       </p>
-
-      <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke beranda
+      <Link
+        to="/audit/history"
+        className="w-fit rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)]"
+      >
+        Lihat riwayat audit
       </Link>
     </div>
   );

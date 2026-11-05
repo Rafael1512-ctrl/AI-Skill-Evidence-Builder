@@ -104,6 +104,11 @@ describe('HrdDashboardPage', () => {
     expect(await screen.findByRole('heading', { name: /halo, dewi/i })).toBeInTheDocument();
     expect(await screen.findByText('Product Designer')).toBeInTheDocument();
     expect(await screen.findByText('5/8 selesai')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Detail' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Detail Product Designer' })).toHaveAttribute(
+      'href',
+      '/screening/job-1',
+    );
     expect(screen.getByRole('link', { name: /buat sesi screening/i })).toHaveAttribute(
       'href',
       '/screening',

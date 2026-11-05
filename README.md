@@ -298,7 +298,7 @@ does `npm run dev:api` start by hand, and is only one process listening on 4000/
 ## Security and privacy
 
 - CVs are sensitive personal data. Audit uploads require an account and are stored so the user can
-  open them from history; users can delete a stored CV document.
+  open them from history. The web app offers no delete; the owner-scoped API route remains.
 - CV text and fetched web pages are treated as untrusted data, never as instructions.
 - Portfolio verification is SSRF-guarded: no localhost, no private ranges, no metadata endpoints,
   no redirect surprises, hard timeouts and response-size caps.

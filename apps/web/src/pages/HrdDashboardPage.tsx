@@ -169,7 +169,7 @@ export function HrdDashboardPage() {
                     <th className="px-5 py-3 font-medium">Status</th>
                     <th className="px-5 py-3 font-medium">Kandidat</th>
                     <th className="px-5 py-3 font-medium">Dibuat</th>
-                    <th className="px-5 py-3 text-right font-medium">Aksi</th>
+                    <th className="px-5 py-3 text-right font-medium">Detail</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -188,9 +188,10 @@ export function HrdDashboardPage() {
                       <td className="px-5 py-4 text-right">
                         <Link
                           to={`/screening/${job.id}`}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+                          aria-label={`Detail ${job.title}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs font-medium hover:border-emerald-400"
                         >
-                          Buka <ArrowRight aria-hidden className="h-3.5 w-3.5" />
+                          Detail <ArrowRight aria-hidden className="h-3.5 w-3.5" />
                         </Link>
                       </td>
                     </tr>

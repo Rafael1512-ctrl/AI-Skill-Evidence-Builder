@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { NavLink, Link } from 'react-router-dom';
+import { NavLink, Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeftRight,
   BriefcaseBusiness,
@@ -75,6 +75,11 @@ const WORKSPACES: Record<
   },
 };
 
+/** `/credits` and `/profile` are shared by both workspaces, so links say which one to stay in. */
+function accountPath(path: '/credits' | '/profile', role: DashboardRole): string {
+  return role === 'hrd' ? `${path}?workspace=hrd` : path;
+}
+
 function navClass(isActive: boolean): string {
   return isActive
     ? 'bg-[var(--color-content)] text-[var(--color-surface)] shadow-sm'
@@ -107,11 +112,17 @@ function Navigation({ role, onNavigate }: { role: DashboardRole; onNavigate?: ()
   );
 }
 
-function AccountNavigation({ onNavigate }: { onNavigate?: () => void }) {
+function AccountNavigation({
+  role,
+  onNavigate,
+}: {
+  role: DashboardRole;
+  onNavigate?: () => void;
+}) {
   return (
     <div className="flex flex-col gap-1 border-t border-[var(--color-border-subtle)] pt-3">
       <NavLink
-        to="/credits"
+        to={accountPath('/credits', role)}
         onClick={onNavigate}
         className={({ isActive }) =>
           `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${navClass(isActive)}`
@@ -121,7 +132,7 @@ function AccountNavigation({ onNavigate }: { onNavigate?: () => void }) {
         Kredit &amp; harga
       </NavLink>
       <NavLink
-        to="/profile"
+        to={accountPath('/profile', role)}
         onClick={onNavigate}
         className={({ isActive }) =>
           `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${navClass(isActive)}`
@@ -198,7 +209,7 @@ export function DashboardShell({ role, children }: { role: DashboardRole; childr
 
       <Navigation role={role} onNavigate={() => setMobileOpen(false)} />
       <div className="mt-auto flex flex-col gap-3">
-        <AccountNavigation onNavigate={() => setMobileOpen(false)} />
+        <AccountNavigation role={role} onNavigate={() => setMobileOpen(false)} />
         <WorkspaceSwitcher role={role} />
         <div className="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border-subtle)] p-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -278,7 +289,7 @@ export function DashboardShell({ role, children }: { role: DashboardRole; childr
 
           <div className="flex items-center gap-2">
             <Link
-              to="/credits"
+              to={accountPath('/credits', role)}
               className="flex items-center gap-2 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-2 text-sm"
             >
               <Coins aria-hidden className="h-4 w-4 text-amber-600" />
@@ -286,7 +297,7 @@ export function DashboardShell({ role, children }: { role: DashboardRole; childr
               <strong>{wallet.data ? formatCredits(wallet.data.available) : '—'}</strong>
             </Link>
             <Link
-              to="/profile"
+              to={accountPath('/profile', role)}
               className={`grid h-10 w-10 place-items-center rounded-full text-xs font-semibold ${workspace.avatarAccent}`}
               aria-label="Buka profil"
             >
@@ -300,5 +311,19 @@ export function DashboardShell({ role, children }: { role: DashboardRole; childr
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * The shell for a page both workspaces share: `?workspace=hrd` keeps the HRD workspace, and
+ * any other entry, such as the landing page, is the Job Seeker workspace.
+ */
+export function WorkspaceShell({ children }: { children: ReactNode }) {
+  const [searchParams] = useSearchParams();
+
+  return (
+    <DashboardShell role={searchParams.get('workspace') === 'hrd' ? 'hrd' : 'job-seeker'}>
+      {children}
+    </DashboardShell>
   );
 }

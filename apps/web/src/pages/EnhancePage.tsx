@@ -6,6 +6,7 @@ import {
   LIMITS,
   type CvEnhancementOptions,
   type CvTemplateKey,
+  type UserProfile,
 } from '@aseb/shared';
 
 import { EnhancementResultView } from '../components/EnhancementResultView.js';
@@ -39,6 +40,18 @@ const INITIAL_FORM: EnhanceForm = {
   useProfileContext: false,
 };
 
+const FROM_PROFILE_HINT = 'Terisi dari profil. Bisa diubah atau dikosongkan.';
+
+/** Links saved on the profile become editable defaults; what is on screen is what is sent. */
+function initialForm(profile: UserProfile): EnhanceForm {
+  return {
+    ...INITIAL_FORM,
+    linkedinUrl: profile.linkedinUrl ?? '',
+    githubUrl: profile.githubUrl ?? '',
+    portfolioUrl: profile.portfolioUrl ?? '',
+  };
+}
+
 function Field({
   id,
   label,
@@ -64,12 +77,11 @@ function Field({
 const inputClass =
   'rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 text-sm';
 
-export function EnhancePage() {
-  const { status } = useAuth();
+function EnhanceWorkspace({ profile }: { profile: UserProfile }) {
   const prefix = useId();
   const [file, setFile] = useState<File | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [form, setForm] = useState<EnhanceForm>(INITIAL_FORM);
+  const [form, setForm] = useState<EnhanceForm>(() => initialForm(profile));
   const enhance = useEnhanceCvMutation();
   const pricing = usePricingQuery();
 
@@ -125,21 +137,6 @@ export function EnhancePage() {
   const shortOnCredits =
     enhance.error instanceof ApiError && enhance.error.code === 'INSUFFICIENT_CREDITS';
 
-  if (status !== 'signed-in') {
-    return (
-      <div className="mx-auto flex max-w-3xl flex-col justify-center gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight">Peningkatan CV Berbayar</h1>
-        <p className="text-[var(--color-content-muted)]">
-          Masuk terlebih dahulu untuk menyempurnakan CV. Setiap penyempurnaan memakai kredit dari
-          dompet Anda.
-        </p>
-        <Link to="/signin" className="font-medium text-[var(--color-brand)]">
-          Masuk atau daftar
-        </Link>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div>
@@ -152,12 +149,7 @@ export function EnhancePage() {
           keahlian, angka, atau tanggal yang tidak ada di CV Anda. Setiap poin yang berasal dari CV
           menyertakan kutipan sumbernya.
         </p>
-        <Link
-          to="/enhance/history"
-          className="mt-3 inline-block text-sm font-medium text-[var(--color-brand)]"
-        >
-          Lihat riwayat peningkatan →
-        </Link>
+
       </div>
 
       <form
@@ -197,7 +189,7 @@ export function EnhancePage() {
           <Field
             id={`${prefix}-linkedin`}
             label="LinkedIn"
-            hint="Opsional, ditampilkan apa adanya."
+            hint={profile.linkedinUrl ? FROM_PROFILE_HINT : 'Opsional, ditampilkan apa adanya.'}
           >
             <input
               id={`${prefix}-linkedin`}
@@ -206,7 +198,11 @@ export function EnhancePage() {
               className={inputClass}
             />
           </Field>
-          <Field id={`${prefix}-github`} label="GitHub" hint="Opsional, ditampilkan apa adanya.">
+          <Field
+            id={`${prefix}-github`}
+            label="GitHub"
+            hint={profile.githubUrl ? FROM_PROFILE_HINT : 'Opsional, ditampilkan apa adanya.'}
+          >
             <input
               id={`${prefix}-github`}
               value={form.githubUrl}
@@ -214,7 +210,11 @@ export function EnhancePage() {
               className={inputClass}
             />
           </Field>
-          <Field id={`${prefix}-portfolio`} label="Portofolio" hint="Opsional.">
+          <Field
+            id={`${prefix}-portfolio`}
+            label="Portofolio"
+            hint={profile.portfolioUrl ? FROM_PROFILE_HINT : 'Opsional.'}
+          >
             <input
               id={`${prefix}-portfolio`}
               value={form.portfolioUrl}
@@ -264,7 +264,8 @@ export function EnhancePage() {
           <label htmlFor={`${prefix}-consent`}>
             Gunakan data profil saya (nama, headline, lokasi, tautan tersimpan) sebagai konteks.
             <span className="mt-0.5 block text-xs text-[var(--color-content-muted)]">
-              Tanpa izin ini, data profil tidak dikirim ke AI.
+              Tanpa izin ini, nama, headline, dan lokasi tidak dikirim ke AI. Tautan yang terisi di
+              atas tetap dipakai; kosongkan jika tidak ingin.
             </span>
           </label>
         </div>
@@ -311,9 +312,34 @@ export function EnhancePage() {
       {/* Social proof tied to this finished result; the API keeps it private until moderated. */}
       {enhance.data ? <TestimonialForm enhancementId={enhance.data.id} /> : null}
 
-      <Link to="/" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke beranda
+      <Link
+        to="/enhance/history"
+        className="w-fit rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)]"
+      >
+        Lihat riwayat peningkatan
       </Link>
     </div>
   );
+}
+
+/** Mounts the form only once the profile exists, so its saved links can be the initial values. */
+export function EnhancePage() {
+  const { status, profile } = useAuth();
+
+  if (status !== 'signed-in' || !profile) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col justify-center gap-4">
+        <h1 className="text-3xl font-semibold tracking-tight">Peningkatan CV Berbayar</h1>
+        <p className="text-[var(--color-content-muted)]">
+          Masuk terlebih dahulu untuk menyempurnakan CV. Setiap penyempurnaan memakai kredit dari
+          dompet Anda.
+        </p>
+        <Link to="/signin" className="font-medium text-[var(--color-brand)]">
+          Masuk atau daftar
+        </Link>
+      </div>
+    );
+  }
+
+  return <EnhanceWorkspace profile={profile} />;
 }

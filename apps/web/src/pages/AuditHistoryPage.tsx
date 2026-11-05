@@ -103,8 +103,10 @@ export function AuditHistoryPage() {
         </div>
       ) : null}
 
-      <Link to="/audit" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke Audit CV
+      <Link to="/audit" 
+        className="w-fit rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)]"
+      >
+        Kembali ke Audit CV
       </Link>
     </div>
   );

@@ -115,8 +115,11 @@ export function EnhancementHistoryPage() {
         </div>
       ) : null}
 
-      <Link to="/enhance" className="text-sm font-medium text-[var(--color-brand)]">
-        ← Kembali ke Peningkatan CV
+      <Link
+        to="/enhance"
+        className="w-fit rounded-lg bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-[var(--color-brand-contrast)]"
+      >
+        Kembali ke Peningkatan CV
       </Link>
     </div>
   );
