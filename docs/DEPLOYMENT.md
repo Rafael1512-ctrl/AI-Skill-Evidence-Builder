@@ -41,10 +41,14 @@ The application is ready to be deployed; the deployment itself is deliberately n
 
 ```bash
 git clone <remote> && cd ai-skill-evidence-builder
-cp .env.example .env.docker        # then edit it, see section 5
+cp .env.docker.example .env.docker # then edit it, see section 5
 docker compose --env-file .env.docker up -d --build
 docker compose logs -f api         # migrate runs first, then the API starts
 ```
+
+The web container is published on `http://localhost:8080` by default. `docker compose ps` should show
+`db`, `redis`, `api` and `web` healthy; `migrate` exits with status 0 after applying the schema and
+the worker runs alongside the API.
 
 Put a TLS terminator in front (Caddy, nginx, Traefik or the platform's load balancer) and point it
 at the `web` container. `web` proxies `/api` to the API, so the browser stays same-origin and
@@ -117,8 +121,8 @@ Read `PROJECT_CONTEXT.md` section 8 before promising anything to a user. The one
 live deployment:
 
 - No live DeepSeek, Supabase or Midtrans run has ever happened (sections 8.12, 8.14, 8.26).
-- The Docker stack and the CI pipeline have never executed, and Playwright has never launched a
-  browser (sections 8.45, 8.46, 8.48).
+- The local Docker stack has been smoke-tested, but deployment to a real public host has not. The
+  CI pipeline has not executed (sections 8.46 and 8.48).
 - Link verification is stored and displayed but does not influence the score (8.35).
 - Exported PDFs and reports are streamed, not stored: the row keeps the size and SHA-256
   (8.31).

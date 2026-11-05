@@ -122,38 +122,72 @@ All scripts are npm scripts, so PowerShell and Git Bash both work. Copy files wi
 
 ## Running with Docker
 
+Pastikan Docker Desktop sudah berjalan:
+
 ```bash
-docker compose up --build          # web on http://localhost:8080, API on :4000
-docker compose run --rm migrate    # only needed if you changed the schema
-docker compose down -v             # stop and wipe the local database/redis volumes
+open -a Docker                     # macOS; start Docker Desktop from the GUI on Windows
+docker info                        # succeeds only after the daemon is ready
 ```
 
-The stack is self-contained and deliberately offline: Postgres and Redis containers, the API, a
-separate queue worker (same image, different entry point) and nginx serving the built web app and
-proxying `/api` so the browser stays same-origin. Defaults are `AI_PROVIDER=mock`,
-`PAYMENT_PROVIDER=mock`, `PDF_RENDERER=mock`, `OUTBOUND_HTTP_PROVIDER=mock` and
-`AUTH_DEV_MODE=true`, so it starts without any provider credentials. Migrations run in a one-shot
-`migrate` service that the API and worker wait for (`service_completed_successfully`).
+For the recommended full stack:
+
+```bash
+cp .env.docker.example .env.docker
+docker compose --env-file .env.docker up -d --build
+docker compose --env-file .env.docker ps
+```
+
+Then open **http://localhost:8080**. The first build normally takes several minutes because Docker
+must download the base images and install the monorepo dependencies. Later builds reuse the cache.
+
+The stack is self-contained and deliberately offline by default: PostgreSQL, Redis, a one-shot
+migration, the API, a separate queue worker and nginx serving the Vite build and proxying `/api`
+so the browser stays same-origin. Defaults are `AI_PROVIDER=mock`, `PAYMENT_PROVIDER=mock`,
+`PDF_RENDERER=mock`, `OUTBOUND_HTTP_PROVIDER=mock` and `AUTH_DEV_MODE=true`, so no provider keys
+are required for a presentation.
+
+To demonstrate the admin dashboard, set `DOCKER_ADMIN_EMAILS` in `.env.docker` to the email you
+will use when signing up. The configured address receives the `ADMIN` role on account creation;
+the API still enforces that role on every admin request.
 
 Nothing sensitive is read from the repository's `.env`. Compose only looks at `DOCKER_*`
 variables, so you can keep local development (`npm run dev`) and the container stack configured
-independently. Put overrides in a git-ignored `.env.docker` and pass it explicitly:
+independently. Put overrides in the git-ignored `.env.docker` copied from `.env.docker.example`:
 
 ```bash
-# .env.docker - never committed (.gitignore covers .env.*)
+# Example: switch to real providers
 DOCKER_AI_PROVIDER=deepseek
-DOCKER_DEEPSEEK_API_KEY=sk-...
+DOCKER_DEEPSEEK_API_KEY=<deepseek key>
+DOCKER_DEEPSEEK_MODEL=<model id>
 DOCKER_PAYMENT_PROVIDER=midtrans
-DOCKER_MIDTRANS_SERVER_KEY=<server key from the Midtrans dashboard>
-DOCKER_MIDTRANS_CLIENT_KEY=<client key from the Midtrans dashboard>
+DOCKER_MIDTRANS_SERVER_KEY=<server key>
+DOCKER_MIDTRANS_CLIENT_KEY=<client key>
 DOCKER_MIDTRANS_MERCHANT_ID=<merchant id>
-
-docker compose --env-file .env.docker up --build
 ```
 
 Useful variables (all defaulted): `DOCKER_WEB_PORT` (8080), `DOCKER_API_PORT` (4000),
 `DOCKER_DB_PORT` (5432), `DOCKER_POSTGRES_USER/PASSWORD/DB`, `DOCKER_AUTH_DEV_MODE`,
 `DOCKER_ADMIN_EMAILS`, `DOCKER_LOG_LEVEL`, `DOCKER_PDF_RENDERER`, `DOCKER_OUTBOUND_HTTP_PROVIDER`.
+
+For daily development you can run only the shared services in Docker:
+
+```bash
+docker compose up -d db redis
+npm run dev
+```
+
+That mode expects the local `.env` database URL to point at
+`postgresql://aseb:aseb@localhost:5432/aseb?schema=public` and, when running the separate worker,
+`REDIS_URL=redis://localhost:6379`.
+
+Useful lifecycle commands:
+
+```bash
+docker compose --env-file .env.docker logs -f api worker web
+docker compose --env-file .env.docker down       # stop; keep database and Redis data
+docker compose --env-file .env.docker down -v    # destructive: remove database and Redis data
+docker compose --env-file .env.docker up -d --build   # rebuild after code/dependency changes
+```
 
 The API image deliberately skips the Chromium download (`PUPPETEER_SKIP_DOWNLOAD=true`) and ships
 with `PDF_RENDERER=mock`; exports then return a deterministic offline PDF. To render real PDFs,

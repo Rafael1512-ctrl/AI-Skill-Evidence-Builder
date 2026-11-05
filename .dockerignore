@@ -1,0 +1,38 @@
+# Version control and local configuration
+.git
+.gitignore
+.env
+.env.*
+!.env.docker.example
+
+# Installed dependencies and build output
+node_modules
+**/node_modules
+dist
+**/dist
+**/*.tsbuildinfo
+apps/api/src/generated
+
+# Tests, reports and local artifacts
+coverage
+playwright-report
+test-results
+blob-report
+apps/web/e2e/.auth
+uploads
+tmp
+.tmp
+*.log
+
+# Reference material and editor/OS caches
+legacy
+docs
+.idea
+.vscode
+.DS_Store
+**/.DS_Store
+
+# Local databases and Docker overrides
+.postgres-data
+.redis-data
+docker-compose.override.yml

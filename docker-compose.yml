@@ -1,0 +1,168 @@
+name: ai-skill-evidence-builder
+
+x-api-environment: &api-environment
+  NODE_ENV: '${DOCKER_NODE_ENV:-development}'
+  PORT: '4000'
+  API_URL: '${DOCKER_PUBLIC_API_URL:-http://localhost:4000}'
+  FRONTEND_URL: '${DOCKER_PUBLIC_WEB_URL:-http://localhost:8080}'
+  CORS_EXTRA_ORIGINS: '${DOCKER_CORS_EXTRA_ORIGINS:-}'
+  LOG_LEVEL: '${DOCKER_LOG_LEVEL:-info}'
+
+  DATABASE_URL: '${DOCKER_DATABASE_URL:-postgresql://aseb:aseb@db:5432/aseb?schema=public}'
+  DIRECT_URL: '${DOCKER_DIRECT_URL:-postgresql://aseb:aseb@db:5432/aseb?schema=public}'
+  REDIS_URL: 'redis://redis:6379'
+
+  SUPABASE_URL: '${DOCKER_SUPABASE_URL:-}'
+  SUPABASE_ANON_KEY: '${DOCKER_SUPABASE_ANON_KEY:-}'
+  SUPABASE_SERVICE_ROLE_KEY: '${DOCKER_SUPABASE_SERVICE_ROLE_KEY:-}'
+  AUTH_DEV_MODE: '${DOCKER_AUTH_DEV_MODE:-true}'
+  AUTH_DEV_JWT_SECRET: '${DOCKER_AUTH_DEV_JWT_SECRET:-docker-local-dev-secret-change-before-sharing}'
+  ADMIN_EMAILS: '${DOCKER_ADMIN_EMAILS:-}'
+
+  AI_PROVIDER: '${DOCKER_AI_PROVIDER:-mock}'
+  DEEPSEEK_API_KEY: '${DOCKER_DEEPSEEK_API_KEY:-}'
+  DEEPSEEK_BASE_URL: '${DOCKER_DEEPSEEK_BASE_URL:-https://api.deepseek.com}'
+  DEEPSEEK_MODEL: '${DOCKER_DEEPSEEK_MODEL:-}'
+  DEEPSEEK_FALLBACK_MODELS: '${DOCKER_DEEPSEEK_FALLBACK_MODELS:-}'
+  DEEPSEEK_TIMEOUT_MS: '${DOCKER_DEEPSEEK_TIMEOUT_MS:-60000}'
+  AI_WORKER_CONCURRENCY: '${DOCKER_AI_WORKER_CONCURRENCY:-5}'
+  AI_MARKUP_MULTIPLIER: '${DOCKER_AI_MARKUP_MULTIPLIER:-2}'
+
+  PAYMENT_PROVIDER: '${DOCKER_PAYMENT_PROVIDER:-mock}'
+  PAYMENT_MOCK_WEBHOOK_SECRET: '${DOCKER_PAYMENT_MOCK_WEBHOOK_SECRET:-dev-mock-webhook-secret}'
+  MIDTRANS_SERVER_KEY: '${DOCKER_MIDTRANS_SERVER_KEY:-}'
+  MIDTRANS_CLIENT_KEY: '${DOCKER_MIDTRANS_CLIENT_KEY:-}'
+  MIDTRANS_MERCHANT_ID: '${DOCKER_MIDTRANS_MERCHANT_ID:-}'
+  MIDTRANS_IS_PRODUCTION: '${DOCKER_MIDTRANS_IS_PRODUCTION:-false}'
+
+  GITHUB_CLIENT_ID: '${DOCKER_GITHUB_CLIENT_ID:-}'
+  GITHUB_CLIENT_SECRET: '${DOCKER_GITHUB_CLIENT_SECRET:-}'
+  GITHUB_TOKEN: '${DOCKER_GITHUB_TOKEN:-}'
+  OUTBOUND_HTTP_PROVIDER: '${DOCKER_OUTBOUND_HTTP_PROVIDER:-mock}'
+  PORTFOLIO_VERIFICATION_ENABLED: '${DOCKER_PORTFOLIO_VERIFICATION_ENABLED:-true}'
+
+  SUPABASE_STORAGE_BUCKET: '${DOCKER_SUPABASE_STORAGE_BUCKET:-aseb-artifacts}'
+  SUPABASE_STORAGE_ENABLED: '${DOCKER_SUPABASE_STORAGE_ENABLED:-false}'
+  PDF_RENDERER: '${DOCKER_PDF_RENDERER:-mock}'
+  PUPPETEER_EXECUTABLE_PATH: '${DOCKER_PUPPETEER_EXECUTABLE_PATH:-}'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: '${DOCKER_POSTGRES_USER:-aseb}'
+      POSTGRES_PASSWORD: '${DOCKER_POSTGRES_PASSWORD:-aseb}'
+      POSTGRES_DB: '${DOCKER_POSTGRES_DB:-aseb}'
+    ports:
+      - '${DOCKER_DB_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${DOCKER_REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    image: aseb-api-migrate:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    restart: 'no'
+    environment:
+      NODE_ENV: '${DOCKER_NODE_ENV:-development}'
+      DATABASE_URL: '${DOCKER_DATABASE_URL:-postgresql://aseb:aseb@db:5432/aseb?schema=public}'
+      DIRECT_URL: '${DOCKER_DIRECT_URL:-postgresql://aseb:aseb@db:5432/aseb?schema=public}'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: aseb-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    environment: *api-environment
+    ports:
+      - '${DOCKER_API_PORT:-4000}:4000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  worker:
+    image: aseb-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    command: ['node', 'apps/api/dist/worker.js']
+    environment: *api-environment
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    image: aseb-web:local
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+      args:
+        VITE_API_BASE_URL: '${DOCKER_VITE_API_BASE_URL:-}'
+        VITE_SUPABASE_URL: '${DOCKER_SUPABASE_URL:-}'
+        VITE_SUPABASE_ANON_KEY: '${DOCKER_SUPABASE_ANON_KEY:-}'
+    restart: unless-stopped
+    ports:
+      - '${DOCKER_WEB_PORT:-8080}:80'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1/healthz']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:

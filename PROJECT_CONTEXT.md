@@ -38,6 +38,13 @@ Harga & Moderasi screens. `GET /api/admin/reports` adds a bounded Asia/Jakarta m
 feature filter, user search and sort controls for monthly revenue, monthly AI usage, and per-user
 credit purchases/usage. The remaining Phase 18 API-only lists now have console screens. No schema
 change was needed.
+Addendum 2026-11-05 (c): the Docker files documented in Phase 21 are now present and have been
+built and started end to end. `docker compose --env-file .env.docker.example up -d --build` builds
+separate API, migration and web images, applies both migrations, starts PostgreSQL, Redis, the API,
+the BullMQ worker and nginx, and serves the web app at `http://localhost:8080`. Health checks passed
+for `db`, `redis`, `api` and `web`; the nginx `/api` proxy and development sign-up were smoke-tested.
+`.env.docker.example` was added for a credential-free offline presentation stack, while
+`.env.docker` remains git-ignored.
 
 **Workflow rule in force:** work phase by phase and stop at the end of every phase for explicit
 approval. Do not begin the next phase until the owner says `Lanjutkan Phase N`.
@@ -86,7 +93,7 @@ admin role (never "security by hidden URL").
 | 18    | Admin                              | COMPLETE (dashboard shell, operational screens and filterable reports)                   |
 | 19    | Security Hardening                 | COMPLETE                                                                                 |
 | 20    | Testing                            | IN PROGRESS (offline slice done: web workspace green, 176 offline tests; see §7 and §10) |
-| 21    | Docker                             | COMPLETE (unbuilt here: no Docker daemon in the agent environment)                       |
+| 21    | Docker                             | COMPLETE (built and smoke-tested end to end)                                             |
 | 22    | GitLab CI                          | COMPLETE (pipeline written; never run - no runner/daemon here)                           |
 | 23    | Final Documentation & Verification | IN PROGRESS (doc drift guard + deploy runbook done; owner-run verification outstanding)  |
 
@@ -412,26 +419,27 @@ dinilai` for an unscored candidate, report export and history). `docs/API.md` an
   measured** on the owner's machine - 83.02% statements / 84.04% lines over 58 files and 490 tests
   (see §7).
 
-- **Phase 21 (Docker) — COMPLETE (files written, never built here)**: `apps/api/Dockerfile` is a
-  four-target multi-stage build - `deps` (full install with `--ignore-scripts`, so husky and the
-  Chromium download stay out), `build` (`build:shared` -> `prisma generate` -> `tsc`, in that
+- **Phase 21 (Docker) — COMPLETE (built and smoke-tested)**: `apps/api/Dockerfile` is a
+  four-target multi-stage build - `deps` (workspace install with Husky and the Chromium download
+  disabled), `build` (`build:shared` -> `prisma generate` -> `tsc`, in that
   order, because the generated client is git-ignored and the compiler needs it), `migrate`
   (`prisma migrate deploy` as a one-shot service) and `runtime` (non-root `node` user, only the
-  compiled output, the generated client, the workspace symlinks and the migration files, with a
-  HEALTHCHECK that hits `/api/health`). `apps/web/Dockerfile` builds Vite in one stage and serves
+  production dependencies and compiled output, with a HEALTHCHECK that hits `/api/health`).
+  `apps/web/Dockerfile` builds Vite in one stage and serves
   it from `nginx:1.27-alpine` with `apps/web/nginx.conf`, which proxies `/api` to the API service
   so the browser stays same-origin and the CORS allowlist does not have to grow. `docker-compose.yml`
   brings up Postgres and Redis (with healthchecks and named volumes), a `migrate` service that the
   API and worker wait for via `service_completed_successfully`, the API, the worker (same image,
-  `node dist/worker.js`) and the web container. All defaults are the offline providers
+  `node apps/api/dist/worker.js`) and the web container. All defaults are the offline providers
   (`AI_PROVIDER=mock`, `PAYMENT_PROVIDER=mock`, `PDF_RENDERER=mock`, `OUTBOUND_HTTP_PROVIDER=mock`,
   `AUTH_DEV_MODE=true`), and configuration is read **only** from `DOCKER_*` variables - the root
   `.env` used by `npm run dev` is never consulted, so a developer's real Midtrans/Supabase
   credentials cannot leak into a container build. `.dockerignore` excludes `.env*`,
   `node_modules`, build output, `coverage`, `docs` and the frozen `legacy/` prototype. Verified in
-  this environment: the compose file parses (YAML + expected services/healthchecks/dependency
-  graph), every path the Dockerfiles copy and every npm script they invoke exists. **Not verified:
-  an actual `docker build`/`compose up`** - there is no Docker daemon here (§8.46).
+  this environment: `docker compose up -d --build` built all images, both migrations applied, the
+  API/worker used BullMQ, all four long-running services became healthy, nginx served the SPA, the
+  `/api` proxy returned a connected health payload and development sign-up created and removed a
+  disposable account.
 
 - **Phase 22 (GitLab CI) — COMPLETE (pipeline written, never executed)**: `.gitlab-ci.yml` mirrors
   the local gates - `quality` (lint, typecheck), `test` (Vitest: unit + PGlite integration, plus
@@ -733,7 +741,7 @@ chance:
 | `npx vitest run --coverage <offline suites + apps/web/src>`                                                              | 60.14% statements / 59.27% lines repo-wide **for that subset only** — the socket-bound suites were not run (§8.4)                                                                                                                                                                                                                                                                                             |
 | `npm run test:e2e`                                                                                                       | NOT RUN — Chromium is not installed here; the specs are written (§8.45)                                                                                                                                                                                                                                                                                                                                       |
 | Compose/Dockerfile structural check (`yaml` parse + path/script existence)                                               | PASS — 6 services (db, redis, migrate, api, worker, web) with the intended healthchecks and dependency graph; every `COPY` source and every referenced npm script resolves (§8.46)                                                                                                                                                                                                                            |
-| `docker compose up --build`                                                                                              | NOT RUN — no Docker daemon in the agent environment (§8.46)                                                                                                                                                                                                                                                                                                                                                   |
+| `docker compose --env-file .env.docker.example up -d --build`                                                            | PASS — migration applied 2 migrations; db, redis, api and web healthy; worker connected to BullMQ; web `/` and `/api/health` returned 200; dev sign-up worked (§8.46)                                                                                                                                                                                                                                         |
 | `.gitlab-ci.yml` structural check (`yaml` parse: jobs, stages, services, `extends`)                                      | PASS — 6 jobs over 5 stages (quality/test/build/e2e/images), `e2e` carries the Postgres service, `images` the DinD service; every referenced npm script exists (§8.48)                                                                                                                                                                                                                                        |
 | `npx playwright test --list --config apps/web/playwright.config.ts`                                                      | PASS — the config loads (including the new `webServer` entries) and lists 4 tests in 3 files; running them still needs Chromium (§8.45)                                                                                                                                                                                                                                                                       |
 | `gitlab-ci` pipeline run                                                                                                 | NOT RUN — no GitLab runner here (§8.48)                                                                                                                                                                                                                                                                                                                                                                       |
@@ -827,11 +835,11 @@ Phase 21 additions:
   (Vite build -> nginx), `apps/web/nginx.conf` (SPA fallback, `/api` proxy, asset caching, security
   headers, 70 MB upload ceiling), `docker-compose.yml` (db, redis, migrate, api, worker, web) and
   `.dockerignore`.
-- Verified here (no Docker daemon): the compose file parses and contains exactly the six intended
-  services with their healthchecks and `service_completed_successfully` gating; every path the
-  Dockerfiles copy and every npm script they invoke exists; `.dockerignore` keeps `.env*`,
-  `node_modules`, build output and `legacy/` out of the build context.
-- Not verified here: an actual image build or `compose up` (§8.46).
+- Verified with Docker Desktop: separate migration/runtime/web images built, both migrations ran,
+  all long-running services became healthy, nginx served the SPA and proxied `/api`, the worker
+  connected to Redis, and a disposable development sign-up succeeded before its row was removed.
+- `.dockerignore` keeps `.env*`, `node_modules`, build output and `legacy/` out of the build context;
+  `.env.docker.example` provides the `DOCKER_*` interpolation surface without reading `.env`.
 
 Phase 20 additions (executed where the sandbox allowed it; see the note below):
 
@@ -1370,13 +1378,10 @@ dev:worker` plus one uploaded batch is enough.
     and two spec bugs of mine - a sign-up request aborted by an immediate navigation (§8.58) and a
     missing credit top-up that correctly produced `402` (§8.59). The diagnostics added to
     `e2e/helpers/session.ts` are what made the last two obvious.
-46. **The Docker stack has never been built.** There is no Docker daemon in the agent environment,
-    so the Dockerfiles and `docker-compose.yml` are verified only structurally (YAML parses, the
-    dependency graph and healthchecks are as intended, every copied path and every invoked npm
-    script exists). The first `docker compose up --build` is an owner-run step; expect to fix image
-    details rather than application code. Two known trade-offs are deliberate: the API image
-    carries dev dependencies (the Prisma CLI is needed by the `migrate` target) and ships without
-    Chromium (`PDF_RENDERER=mock`, documented in the README).
+46. ~~**The Docker stack has never been built.**~~ **Resolved 2026-11-05.** The migration, API,
+    worker and web images were built and the full stack was smoke-tested in Docker Desktop. Two
+    trade-offs remain deliberate: the separate migration image carries the Prisma CLI, and the
+    runtime image ships without Chromium (`PDF_RENDERER=mock`, documented in the README).
 47. **`TEST_DATABASE_URL` was documented for months but never implemented.** `AGENTS.md`,
     `README.md` and `docs/DATABASE.md` told contributors they could point the integration suites at
     a real PostgreSQL instance with that variable; `tests/helpers/db.ts` only ever booted PGlite,
@@ -1391,16 +1396,14 @@ dev:worker` plus one uploaded batch is enough.
     pipeline is where the remaining details surface - cache paths, the Playwright image tag versus
     `@playwright/test` 1.63, and the E2E locators (§8.45). Expect to iterate there, not in the
     application code.
-49. **The Phase 21 Dockerfiles needed a fix during Phase 22.** They used `npm ci --ignore-scripts`,
-    which would have skipped `@prisma/engines`' postinstall and broken `prisma generate` /
-    `prisma migrate deploy` inside the image. Both Dockerfiles now install with scripts enabled and
-    disable only Chromium and husky. Caught by reasoning about the install graph, not by a build -
-    the first `docker compose up --build` remains the real test (§8.46).
-50. **`docs/DEPLOYMENT.md` describes a deployment nobody has performed.** It was written from the
-    code, `docs/SECURITY.md` and this document, so its commands are consistent with the repository
-    but unproven end to end: the pooler/SSL details come from §6's hard-won notes, the compose
-    commands from §8.46's structural check only. Treat the first run as a rehearsal and correct the
-    runbook where reality differs - that is what it is for.
+49. ~~**The Phase 21 Dockerfiles needed a fix during Phase 22.**~~ **Resolved by the real build.**
+    The images install with scripts enabled (Prisma postinstall required), disable Chromium and
+    Husky, and use separate image tags for `migrate` and runtime. The first build also found and
+    fixed a development-runtime dependency (`pino-pretty`) that had been pruned (§8.46).
+50. **`docs/DEPLOYMENT.md` has been rehearsed for the local Docker stack, not for a live host.**
+    Migration, health checks, nginx proxying and offline auth are verified locally. TLS, managed
+    Supabase/DeepSeek/Midtrans, the pooler/SSL variants and a public hostname remain operator-run
+    checks because they require real credentials and external infrastructure.
 51. **The testimonial moderation routes mounted `requireAdmin()` without `requireAuth()`** (found by
     the full suite on 2026-09-26, fixed). `requireAdmin` only reads the context `requireAuth` puts on
     the request, so **every** moderation call - including an admin's - answered `401`: approving a
@@ -1607,14 +1610,14 @@ dev:worker` plus one uploaded batch is enough.
     driver otherwise; `npm run dev:worker`/`start:worker` now consumes both screening and CV jobs.
     Migration `20261105000000_async_cv_processing` adds `cv_audit_jobs`, its status/mode enums and
     a unique `cv_analyses.audit_job_id` for idempotent retry delivery.
-71. **Screening runs only when the recruiter starts it** (2026-11-05, changed by owner request).
+72. **Screening runs only when the recruiter starts it** (2026-11-05, changed by owner request).
     Upload now stores the list and leaves the job `CREATED`; `POST /screening/jobs/:jobId/start`
     holds the credits and queues the batch. No schema change: `CREATED` with `totalCandidates > 0`
     means uploaded and waiting. **Verifikasi semua** is one button with two steps: it starts the
     scoring first, and once candidates are completed it runs the bulk link check. The per-candidate
     link button was removed from the web app; its API route remains. The job and results queries now
     poll while a batch runs, which also fixes results staying stale after processing finished.
-72. **Screening counters and reports** (2026-11-05, fixed). Nothing ever wrote
+73. **Screening counters and reports** (2026-11-05, fixed). Nothing ever wrote
     `completed_candidates`/`failed_candidates`, so finished batches showed 0. `finalizeJob` now
     stores them and job summaries read live candidate counts; rows finalised earlier keep 0 in the
     admin list. The report PDF gained a summary and ranking table and uses screen labels. The CSV is
@@ -1669,9 +1672,8 @@ done from an agent sandbox and are the owner's to run and record:
    `npm run test` and `npm run test:coverage` are green on the owner's Mac (58 files / 490 tests,
    83.02% statements) after the two fix rounds - the thirteen real failures that run surfaced are
    all resolved (§8.51-53), and **the browser suite is green too** - `npm run test:e2e` passes all
-   five specs (§8.45). **Still outstanding**: `docker compose up --build` (§8.46, needs Docker
-   Desktop) and the GitLab pipeline (§8.48); expect the first image build to need small fixes, it
-   has never executed.
+   five specs (§8.45), and the local Docker stack now builds and starts successfully (§8.46).
+   **Still outstanding**: the GitLab pipeline (§8.48) and a deployment to a real public host.
 2. **Live providers**: one Supabase project with real auth (§8.14), one DeepSeek call with a valid
    key (§8.26), one Midtrans sandbox top-up with its notification replayed (§8.12). The owner has the
    Midtrans sandbox credentials; `docs/DEPLOYMENT.md` §6 is the smoke test to follow.
