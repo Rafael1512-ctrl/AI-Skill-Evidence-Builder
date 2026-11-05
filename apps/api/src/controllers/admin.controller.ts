@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 
 import type {
+  AdminReportQuery,
   AdminUserListQuery,
   AiUsageSummaryQuery,
   CreditAdjustmentInput,
@@ -27,6 +28,14 @@ export async function getAdminOverview(_req: Request, res: Response): Promise<vo
   const pricing = await adminService.listPricing();
 
   res.json({ data: { overview, pricing } });
+}
+
+/** GET /api/admin/reports - filterable revenue, AI usage and per-user credit reports. */
+export async function getAdminReports(req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<AdminReportQuery>(req);
+  const report = await adminService.reports(query);
+
+  res.json({ data: { report } });
 }
 
 /** GET /api/admin/users - paginated users with their wallet balances. */

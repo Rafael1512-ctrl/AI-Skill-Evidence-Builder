@@ -32,6 +32,12 @@ PDF and persist a durable job before returning `202`; AI processing, credit sett
 storage run through the new `cv-processing` queue/worker. The audit page and enhancement page keep
 the job id in the URL and poll status, so refreshing or reopening the tab resumes the same job
 (§8.71).
+Addendum 2026-11-05 (b): the admin area now has the same dedicated shell pattern as the two user
+workspaces, with separate Ringkasan, Laporan, Pengguna, Keuangan, Pemakaian AI, Screening, and
+Harga & Moderasi screens. `GET /api/admin/reports` adds a bounded Asia/Jakarta month range, AI
+feature filter, user search and sort controls for monthly revenue, monthly AI usage, and per-user
+credit purchases/usage. The remaining Phase 18 API-only lists now have console screens. No schema
+change was needed.
 
 **Workflow rule in force:** work phase by phase and stop at the end of every phase for explicit
 approval. Do not begin the next phase until the owner says `Lanjutkan Phase N`.
@@ -77,7 +83,7 @@ admin role (never "security by hidden URL").
 | 15    | Screening Results & Reports        | COMPLETE                                                                                 |
 | 16    | Evidence Verification              | COMPLETE (claim-level cross-checking is deferred)                                        |
 | 17    | Testimonials                       | COMPLETE                                                                                 |
-| 18    | Admin                              | COMPLETE (list screens are API-only for now)                                             |
+| 18    | Admin                              | COMPLETE (dashboard shell, operational screens and filterable reports)                   |
 | 19    | Security Hardening                 | COMPLETE                                                                                 |
 | 20    | Testing                            | IN PROGRESS (offline slice done: web workspace green, 176 offline tests; see §7 and §10) |
 | 21    | Docker                             | COMPLETE (unbuilt here: no Docker daemon in the agent environment)                       |
@@ -366,13 +372,13 @@ dinilai` for an unscored candidate, report export and history). `docs/API.md` an
   `updatedByUserId` records who changed it) and `POST /users/:userId/credits` goes through
   `CreditService.adjust`, so an admin gets no second way to move a balance - the ledger row is
   an `ADJUSTMENT` referencing the admin. Role changes refuse a self-demotion (409), which would
-  otherwise lock the only admin out of the console. The console UI at `/admin` shows the
-  aggregates, edits prices, moderates the Phase 17 testimonial queue and lists failed candidates
-  and recent jobs; the remaining lists are reachable by API and documented as such. The admin
-  link on the landing page appears only for an admin, and the page itself is a convenience - the
-  server is the boundary. No migration was needed. Covered by
-  `apps/web/src/pages/AdminPage.test.tsx` (4, executed) and `tests/admin-api.test.ts` (5, written
-  but not executed here).
+  otherwise lock the only admin out of the console. The admin area now uses a dedicated shell and
+  separate dashboard, reports, users, billing, AI usage, screening and settings screens. It shows
+  the aggregates, filterable monthly/per-user reports, users and role controls, ledger adjustments,
+  payments, webhook deliveries, AI calls, screening failures, testimonial moderation and pricing.
+  The admin area remains unlinked from user navigation and `requireAdmin` is the boundary. No
+  migration was needed. Covered by `apps/web/src/pages/AdminPage.test.tsx` (7, executed) and
+  `tests/admin-api.test.ts` (6, executed with socket permission).
 
 - **Phase 19 (Security Hardening) — COMPLETE**: `docs/SECURITY.md` is written (the last owed
   document) - assets, the threat model with the control that implements each claim, privacy,
@@ -528,13 +534,16 @@ apps/web            React 19 + Vite 8 + Tailwind v4
                     cvExport.ts (paid PDF export mutation + download helper),
                     screening.ts (screening queries/mutations + report download),
                     testimonials.ts (public list, own reviews, submit),
-                    admin.ts (console queries, moderation, pricing override),
+                    admin.ts (console queries, reports, moderation, role/credit mutations,
+                    pricing override),
                     supabase.ts (code-split browser SDK: session, sign-in/sign-up, Google OAuth and
                     identity linking)
   src/pages         HomePage, SignInPage, ProfilePage, CreditsPage, AuditPage, EnhancePage,
                     ScreeningPage, ScreeningJobPage, TestimonialsPage (+ TestimonialForm),
-                    AdminPage
-  src/components    ProtectedRoute, DashboardShell (responsive role workspace + shared wallet)
+                    AdminPage dispatcher + admin/ dashboard, reports, users, billing, AI usage,
+                    screening and settings screens
+  src/components    ProtectedRoute, DashboardShell (responsive role workspace + shared wallet),
+                    AdminShell (admin-only operational navigation)
   src/App.tsx       providers (TanStack Query, auth) + React Router 7 routes
   e2e/              Playwright specs
   Dockerfile        Vite build served by nginx; nginx.conf proxies /api (Phase 21)
@@ -1334,10 +1343,10 @@ dev:worker` plus one uploaded batch is enough.
 40. ~~**`testimonials` have no rate limit of their own.**~~ **Resolved in Phase 19**:
     `POST /testimonials` carries a per-account fixed-window cap (5 per day) in front of validation,
     on top of the one-per-enhancement rule and the admin gate.
-41. **The console shows aggregates, prices, testimonial moderation, failed candidates and recent
-    jobs - the rest is API-only.** Users, transactions, payments, webhook events and AI usage all
-    have admin endpoints and validated contracts, but no screen yet; the page says so in place,
-    so the gap is visible rather than implied.
+41. ~~**The console shows aggregates, prices, testimonial moderation, failed candidates and recent
+    jobs - the rest is API-only.**~~ **Resolved 2026-11-05.** The admin shell now exposes the
+    previously API-only users, transactions, payments, webhook events and AI usage lists, plus
+    filterable monthly/per-user reports.
 42. **Admin access is all-or-nothing.** `requireAdmin` is a single role: an admin can change
     prices, hand out the role and adjust balances. There is no read-only or support role, and no
     per-action audit table beyond `FeaturePricing.updatedByUserId`,

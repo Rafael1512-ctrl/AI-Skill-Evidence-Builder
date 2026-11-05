@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AdminShell } from '../components/AdminShell.js';
 import { AuthProvider } from '../lib/auth.js';
 import {
   configureSupabaseEnv,
@@ -97,6 +98,77 @@ const PENDING_TESTIMONIAL = {
   moderatedAt: null,
 };
 
+const USER = {
+  id: 'user-2',
+  email: 'budi@example.com',
+  fullName: 'Budi',
+  role: 'USER',
+  isActive: true,
+  emailVerified: true,
+  balance: 25,
+  reserved: 0,
+  createdAt: '2026-09-26T10:00:00.000Z',
+  updatedAt: '2026-09-26T10:00:00.000Z',
+};
+
+const REPORT = {
+  range: { from: '2026-10', to: '2026-11' },
+  summary: {
+    revenueIdr: 150_000,
+    payments: 3,
+    creditsPurchased: 200,
+    creditsUsed: 12,
+    aiRequests: 40,
+    aiEstimatedCostUsd: 1.5,
+    aiCreditsCharged: 8,
+  },
+  monthlyRevenue: [
+    { month: '2026-10', revenueIdr: 100_000, payments: 2, creditsSold: 100 },
+    { month: '2026-11', revenueIdr: 50_000, payments: 1, creditsSold: 50 },
+  ],
+  monthlyAiUsage: [
+    {
+      month: '2026-10',
+      requests: 25,
+      failedRequests: 1,
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 0,
+      estimatedCostUsd: 1,
+      creditsCharged: 5,
+    },
+    {
+      month: '2026-11',
+      requests: 15,
+      failedRequests: 0,
+      inputTokens: 60,
+      outputTokens: 30,
+      cachedTokens: 0,
+      estimatedCostUsd: 0.5,
+      creditsCharged: 3,
+    },
+  ],
+  perUser: {
+    items: [
+      {
+        userId: 'user-2',
+        email: 'budi@example.com',
+        fullName: 'Budi',
+        role: 'USER',
+        balance: 25,
+        reserved: 0,
+        creditsPurchased: 100,
+        purchaseCount: 2,
+        creditsUsed: 75,
+        usageCount: 4,
+      },
+    ],
+    page: 1,
+    pageSize: 20,
+    total: 1,
+  },
+};
+
 const fetchMock = vi.fn();
 
 function jsonResponse(payload: unknown) {
@@ -115,6 +187,9 @@ function respond(role: 'USER' | 'ADMIN') {
     }
     if (url.includes('/api/admin/overview')) {
       return jsonResponse({ data: { overview: OVERVIEW, pricing: PRICING } });
+    }
+    if (url.includes('/api/admin/reports')) {
+      return jsonResponse({ data: { report: REPORT } });
     }
     if (url.includes('/api/admin/failed-candidates')) {
       return jsonResponse({
@@ -143,6 +218,23 @@ function respond(role: 'USER' | 'ADMIN') {
     if (url.includes('/api/admin/jobs')) {
       return jsonResponse({
         data: { jobs: { items: [], page: 1, pageSize: 20, total: 0 } },
+      });
+    }
+    if (url.includes('/api/admin/users/') && init?.method === 'PATCH') {
+      return jsonResponse({
+        data: {
+          user: {
+            id: USER.id,
+            email: USER.email,
+            role: 'ADMIN',
+            updatedAt: '2026-09-26T11:00:00.000Z',
+          },
+        },
+      });
+    }
+    if (url.includes('/api/admin/users')) {
+      return jsonResponse({
+        data: { users: { items: [USER], page: 1, pageSize: 20, total: 1 } },
       });
     }
     if (url.includes('/api/admin/pricing/')) {
@@ -179,13 +271,15 @@ function respond(role: 'USER' | 'ADMIN') {
   });
 }
 
-function renderAdminPage() {
+function renderAdminPage(path = '/admin') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <MemoryRouter>
-          <AdminPage />
+        <MemoryRouter initialEntries={[path]}>
+          <AdminShell>
+            <AdminPage />
+          </AdminShell>
         </MemoryRouter>
       </AuthProvider>
     </QueryClientProvider>,
@@ -207,30 +301,65 @@ describe('AdminPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('gates the console for a non-admin', async () => {
+  it('gates the console for a non-admin without calling admin endpoints', async () => {
     respond('USER');
     renderAdminPage();
 
     expect(await screen.findByText(/Halaman ini hanya untuk admin/)).toBeInTheDocument();
-    // No admin request is even attempted for a known non-admin.
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/admin/'))).toBe(false);
   });
 
-  it('shows the aggregates for an admin', async () => {
+  it('shows the admin overview shell and recent operations', async () => {
     respond('ADMIN');
     renderAdminPage();
 
     expect(await screen.findByText('Pengguna')).toBeInTheDocument();
-    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(await screen.findByText('12')).toBeInTheDocument();
     expect(screen.getByText('1 menunggu')).toBeInTheDocument();
-    expect(screen.getByText(/DB connected/)).toBeInTheDocument();
-    expect(screen.getByText('Budi')).toBeInTheDocument();
+    expect(screen.getByText('connected')).toBeInTheDocument();
+    expect(screen.getAllByText('Budi').length).toBeGreaterThan(0);
     expect(screen.getByText(/Penyedia AI tidak tersedia/)).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Navigasi admin' })).toBeInTheDocument();
   });
 
-  it('saves a credit price override', async () => {
+  it('renders monthly revenue, AI usage and per-user credit reports', async () => {
     respond('ADMIN');
-    renderAdminPage();
+    renderAdminPage('/admin/reports');
+
+    expect(await screen.findByText('Laporan operasional')).toBeInTheDocument();
+    expect(await screen.findByText('Pendapatan per bulan')).toBeInTheDocument();
+    expect(screen.getByText('Pemakaian AI per bulan')).toBeInTheDocument();
+    expect(screen.getByText('Kredit per pengguna')).toBeInTheDocument();
+    expect(await screen.findByText('budi@example.com')).toBeInTheDocument();
+  });
+
+  it('applies report filters to the API query', async () => {
+    respond('ADMIN');
+    renderAdminPage('/admin/reports');
+    const user = userEvent.setup();
+
+    await screen.findByText('Laporan operasional');
+    await user.selectOptions(screen.getByLabelText('Fitur AI'), 'CV_ENHANCEMENT');
+    await user.type(screen.getByLabelText('Cari pengguna'), 'budi');
+    await user.selectOptions(screen.getByLabelText('Urutkan pengguna'), 'purchases');
+    await user.click(screen.getByRole('button', { name: 'Terapkan filter' }));
+
+    expect(
+      fetchMock.mock.calls.some(([url]) => {
+        const value = String(url);
+        return (
+          value.includes('/api/admin/reports?') &&
+          value.includes('feature=CV_ENHANCEMENT') &&
+          value.includes('search=budi') &&
+          value.includes('sort=purchases')
+        );
+      }),
+    ).toBe(true);
+  });
+
+  it('saves a credit price override from settings', async () => {
+    respond('ADMIN');
+    renderAdminPage('/admin/settings');
     const user = userEvent.setup();
 
     const input = await screen.findByLabelText('Kredit CV_ENHANCEMENT');
@@ -245,9 +374,9 @@ describe('AdminPage', () => {
     expect(JSON.parse((put?.[1] as { body: string }).body)).toEqual({ credits: 7 });
   });
 
-  it('moderates a pending testimonial', async () => {
+  it('moderates a pending testimonial from settings', async () => {
     respond('ADMIN');
-    renderAdminPage();
+    renderAdminPage('/admin/settings');
     const user = userEvent.setup();
 
     expect(await screen.findByText('Andi')).toBeInTheDocument();
@@ -258,5 +387,24 @@ describe('AdminPage', () => {
     );
     expect(patch?.[0]).toBe('/api/testimonials/testi-1/moderation');
     expect(JSON.parse((patch?.[1] as { body: string }).body)).toEqual({ status: 'APPROVED' });
+  });
+
+  it('changes a user role only after confirmation', async () => {
+    respond('ADMIN');
+    renderAdminPage('/admin/users');
+    const user = userEvent.setup();
+
+    const role = await screen.findByLabelText('Peran budi@example.com');
+    await user.selectOptions(role, 'ADMIN');
+    await user.click(screen.getByRole('button', { name: 'Simpan' }));
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Ubah peran pengguna');
+    await user.click(screen.getByRole('button', { name: 'Simpan peran' }));
+
+    const patch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes('/api/admin/users/user-2/role') &&
+        (init as { method?: string })?.method === 'PATCH',
+    );
+    expect(JSON.parse((patch?.[1] as { body: string }).body)).toEqual({ role: 'ADMIN' });
   });
 });

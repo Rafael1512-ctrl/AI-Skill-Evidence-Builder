@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  adminReportQuerySchema,
   adminUserListQuerySchema,
   aiUsageSummaryQuerySchema,
   creditAdjustmentSchema,
@@ -13,6 +14,7 @@ import { z } from 'zod';
 import {
   adjustAdminUserCredits,
   getAdminOverview,
+  getAdminReports,
   listAdminAiUsage,
   listAdminFailedCandidates,
   listAdminJobs,
@@ -41,6 +43,7 @@ export const adminRouter = Router();
 adminRouter.use(requireAuth(), requireAdmin());
 
 adminRouter.get('/overview', getAdminOverview);
+adminRouter.get('/reports', validate({ query: adminReportQuerySchema }), getAdminReports);
 adminRouter.get('/users', validate({ query: adminUserListQuerySchema }), listAdminUsers);
 adminRouter.get('/transactions', validate({ query: paginationQuerySchema }), listAdminTransactions);
 adminRouter.get('/payments', validate({ query: paginationQuerySchema }), listAdminPayments);

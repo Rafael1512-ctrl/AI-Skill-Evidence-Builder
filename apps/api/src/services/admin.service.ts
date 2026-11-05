@@ -1,5 +1,7 @@
 import type {
   AdminOverview,
+  AdminReport,
+  AdminReportQuery,
   AdminUserListQuery,
   AiUsageSummaryQuery,
   CreditAdjustmentInput,
@@ -13,7 +15,8 @@ import { env } from '../config/env.js';
 import { AdminRepository } from '../repositories/admin.repository.js';
 import { getScreeningQueue } from '../queues/index.js';
 import { AppError } from '../utils/errors.js';
-import { toIso } from '../utils/values.js';
+import { jakartaMonthKey, reportRangeBounds } from '../utils/reporting.js';
+import { toIso, toNumber } from '../utils/values.js';
 import {
   listAiUsage,
   summariseAiUsageByFeatureSince,
@@ -120,6 +123,160 @@ export class AdminService {
         paymentProvider: env.PAYMENT_PROVIDER,
         queueDriver: queue.driver,
         environment: env.NODE_ENV,
+      },
+    };
+  }
+
+  /**
+   * Filterable business reports. Every number is derived on the server:
+   * revenue from settled payment rows, AI usage from provider records, and user credit
+   * movements from the ledger (never from a cached wallet total).
+   */
+  async reports(query: AdminReportQuery): Promise<AdminReport> {
+    let bounds: ReturnType<typeof reportRangeBounds>;
+    try {
+      bounds = reportRangeBounds({ from: query.from, to: query.to });
+    } catch {
+      throw AppError.validation(
+        [
+          {
+            where: 'query',
+            path: 'from',
+            message: 'Rentang laporan harus antara 1 dan 36 bulan.',
+          },
+        ],
+        'Rentang laporan tidak valid.',
+      );
+    }
+
+    const [revenueRows, aiRows, creditAggregates, matchingUserIds] = await Promise.all([
+      this.repository.listRevenueReportRows({ start: bounds.start, end: bounds.end }),
+      this.repository.listAiUsageReportRows({
+        start: bounds.start,
+        end: bounds.end,
+        feature: query.feature,
+      }),
+      this.repository.aggregateUserCreditsReport({ start: bounds.start, end: bounds.end }),
+      query.search
+        ? this.repository.listMatchingUserIds(query.search)
+        : Promise.resolve<string[] | null>(null),
+    ]);
+
+    const monthlyRevenue = new Map(
+      bounds.months.map((month) => [month, { month, revenueIdr: 0, payments: 0, creditsSold: 0 }]),
+    );
+    for (const row of revenueRows) {
+      const moneyDate = row.paidAt ?? row.completedAt ?? row.createdAt;
+      const month = monthlyRevenue.get(jakartaMonthKey(moneyDate));
+      if (!month) continue;
+      month.revenueIdr += row.amountIdr;
+      month.payments += 1;
+      month.creditsSold += row.credits;
+    }
+
+    const monthlyAiUsage = new Map(
+      bounds.months.map((month) => [
+        month,
+        {
+          month,
+          requests: 0,
+          failedRequests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedTokens: 0,
+          estimatedCostUsd: 0,
+          creditsCharged: 0,
+        },
+      ]),
+    );
+    for (const row of aiRows) {
+      const month = monthlyAiUsage.get(jakartaMonthKey(row.createdAt));
+      if (!month) continue;
+      month.requests += row.requestCount;
+      month.failedRequests += row.success ? 0 : row.requestCount;
+      month.inputTokens += row.inputTokens;
+      month.outputTokens += row.outputTokens;
+      month.cachedTokens += row.cachedTokens;
+      month.estimatedCostUsd += toNumber(row.estimatedCostUsd);
+      month.creditsCharged += row.creditsCharged;
+    }
+
+    const allowedUserIds = matchingUserIds === null ? null : new Set(matchingUserIds);
+    const creditByUser = new Map<
+      string,
+      { creditsPurchased: number; purchaseCount: number; creditsUsed: number; usageCount: number }
+    >();
+    for (const row of creditAggregates) {
+      if (allowedUserIds && !allowedUserIds.has(row.userId)) continue;
+      const current = creditByUser.get(row.userId) ?? {
+        creditsPurchased: 0,
+        purchaseCount: 0,
+        creditsUsed: 0,
+        usageCount: 0,
+      };
+      if (row.type === 'TOP_UP') {
+        current.creditsPurchased += Math.max(0, row.amount);
+        current.purchaseCount += row.count;
+      } else {
+        current.creditsUsed += Math.abs(Math.min(0, row.amount));
+        current.usageCount += row.count;
+      }
+      creditByUser.set(row.userId, current);
+    }
+
+    const users = await this.repository.listReportUsers([...creditByUser.keys()]);
+    const reportUsers = users.flatMap((row) => {
+      const credit = creditByUser.get(row.user.id);
+      if (!credit) return [];
+      return [
+        {
+          userId: row.user.id,
+          email: row.user.email,
+          fullName: row.user.fullName,
+          role: row.user.role,
+          balance: row.balance,
+          reserved: row.reserved,
+          ...credit,
+        },
+      ];
+    });
+
+    reportUsers.sort((left, right) => {
+      const primary =
+        query.sort === 'purchases'
+          ? right.creditsPurchased - left.creditsPurchased
+          : query.sort === 'balance'
+            ? right.balance - left.balance
+            : right.creditsUsed - left.creditsUsed;
+      return primary === 0 ? left.email.localeCompare(right.email) : primary;
+    });
+
+    const skip = (query.page - 1) * query.pageSize;
+    const perUserItems = reportUsers.slice(skip, skip + query.pageSize);
+    const creditsPurchased = reportUsers.reduce((sum, row) => sum + row.creditsPurchased, 0);
+    const creditsUsed = reportUsers.reduce((sum, row) => sum + row.creditsUsed, 0);
+
+    const revenue = [...monthlyRevenue.values()];
+    const aiUsage = [...monthlyAiUsage.values()];
+
+    return {
+      range: { from: bounds.from, to: bounds.to },
+      summary: {
+        revenueIdr: revenue.reduce((sum, row) => sum + row.revenueIdr, 0),
+        payments: revenue.reduce((sum, row) => sum + row.payments, 0),
+        creditsPurchased,
+        creditsUsed,
+        aiRequests: aiUsage.reduce((sum, row) => sum + row.requests, 0),
+        aiEstimatedCostUsd: aiUsage.reduce((sum, row) => sum + row.estimatedCostUsd, 0),
+        aiCreditsCharged: aiUsage.reduce((sum, row) => sum + row.creditsCharged, 0),
+      },
+      monthlyRevenue: revenue,
+      monthlyAiUsage: aiUsage,
+      perUser: {
+        items: perUserItems,
+        page: query.page,
+        pageSize: query.pageSize,
+        total: reportUsers.length,
       },
     };
   }

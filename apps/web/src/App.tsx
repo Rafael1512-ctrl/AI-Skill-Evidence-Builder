@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 
 import { CreditsRoute } from './components/CreditsRoute.js';
+import { AdminShell } from './components/AdminShell.js';
 import { DashboardShell, WorkspaceShell } from './components/DashboardShell.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { AuthProvider } from './lib/auth.js';
@@ -112,7 +113,69 @@ export function App() {
               path="/admin"
               element={
                 <ProtectedRoute>
-                  <AdminPage />
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/reports"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/billing"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/ai-usage"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/screening"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/settings"
+              element={
+                <ProtectedRoute>
+                  <AdminShell>
+                    <AdminPage />
+                  </AdminShell>
                 </ProtectedRoute>
               }
             />

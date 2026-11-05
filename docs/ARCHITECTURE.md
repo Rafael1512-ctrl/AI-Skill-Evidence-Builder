@@ -119,14 +119,20 @@ the pages render the stored results and never recompute a derived number.
 Routes: `/` role-first landing, `/dashboard/job-seeker` and `/dashboard/hrd` (the same account can
 open either workspace), `/audit`, `/audit/history`, `/audit/history/:analysisId`, `/enhance`,
 `/enhance/history`, `/enhance/history/:enhancementId`, `/profile`, `/credits`, `/screening`,
-`/screening/:jobId` and `/signin`. `/admin` is intentionally not linked from user navigation; it is
-entered directly and remains server-authorized.
+`/screening/:jobId`, `/signin`, and the `/admin` operations area (`reports`, `users`, `billing`,
+`ai-usage`, `screening`, `settings`). The admin area is intentionally not linked from user
+navigation; it is entered directly and remains server-authorized.
 
 Both non-admin workspaces use `components/DashboardShell.tsx`: a responsive sidebar, shared wallet
 indicator, account menu and a workspace switcher. Role selection is a UI preference, not an account
 role. The Job Seeker dashboard provides audit/enhancement quick actions plus stored-CV history and
 deletion; the HRD dashboard summarizes screening sessions and links to the create/read/cancel/report
 flow.
+
+The admin area uses `components/AdminShell.tsx`, a responsive operations sidebar with no workspace
+switcher. Its reports page sends the selected Asia/Jakarta month range, AI feature, user search and
+sort to `GET /api/admin/reports`; the API derives every displayed aggregate from payments, AI usage
+records and the credit ledger rather than trusting client calculations.
 
 ## Containers (Phase 21)
 

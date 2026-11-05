@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { adminOverviewResponseSchema } from '@aseb/shared';
+import { adminOverviewResponseSchema, adminReportResponseSchema } from '@aseb/shared';
 
 import { resetRateLimits } from '../src/middleware/rate-limit.js';
 import { bearer, signUpDevUser, type DevSession } from './helpers/auth.js';
@@ -44,6 +44,7 @@ describe('admin API', () => {
   it('refuses anonymous and non-admin callers on every admin route', async () => {
     const routes: Array<[string, 'get' | 'post' | 'put' | 'patch']> = [
       ['/api/admin/overview', 'get'],
+      ['/api/admin/reports', 'get'],
       ['/api/admin/users', 'get'],
       ['/api/admin/transactions', 'get'],
       ['/api/admin/payments', 'get'],
@@ -77,6 +78,135 @@ describe('admin API', () => {
     expect(response.body.data.overview.users.admins).toBe(1);
     expect(response.body.data.overview.system.queueDriver).toBe('in-process');
     expect(response.body.data.pricing.length).toBeGreaterThan(0);
+  });
+
+  it('returns filterable monthly and per-user reports from the real sources', async () => {
+    const admin = await makeAdmin();
+    const target = await signUpDevUser(app, {
+      email: 'report-target@example.com',
+      fullName: 'Laporan Target',
+    });
+    const wallet = await ctx.prisma.creditWallet.findUnique({
+      where: { userId: target.userId },
+    });
+    expect(wallet).not.toBeNull();
+
+    await ctx.prisma.creditTransaction.createMany({
+      data: [
+        {
+          walletId: wallet?.id as string,
+          userId: target.userId,
+          type: 'TOP_UP',
+          amount: 100,
+          balanceBefore: 0,
+          balanceAfter: 100,
+          description: 'Pembelian laporan',
+          createdAt: new Date('2026-10-15T03:00:00.000Z'),
+        },
+        {
+          walletId: wallet?.id as string,
+          userId: target.userId,
+          type: 'USAGE',
+          amount: -25,
+          balanceBefore: 100,
+          balanceAfter: 75,
+          feature: 'CV_ENHANCEMENT',
+          description: 'Pemakaian laporan',
+          createdAt: new Date('2026-10-20T03:00:00.000Z'),
+        },
+      ],
+    });
+
+    await ctx.prisma.aiUsageRecord.createMany({
+      data: [
+        {
+          userId: target.userId,
+          feature: 'CV_ENHANCEMENT',
+          provider: 'mock',
+          model: 'mock-model',
+          requestCount: 2,
+          inputTokens: 100,
+          outputTokens: 50,
+          estimatedCostUsd: 0.25,
+          creditsCharged: 5,
+          createdAt: new Date('2026-10-10T03:00:00.000Z'),
+        },
+        {
+          userId: target.userId,
+          feature: 'HRD_SCREEN_PER_CV',
+          provider: 'mock',
+          model: 'mock-model',
+          requestCount: 3,
+          inputTokens: 60,
+          outputTokens: 20,
+          estimatedCostUsd: 0.1,
+          creditsCharged: 2,
+          success: false,
+          createdAt: new Date('2026-11-02T03:00:00.000Z'),
+        },
+      ],
+    });
+
+    await ctx.prisma.paymentTransaction.create({
+      data: {
+        userId: target.userId,
+        provider: 'mock',
+        orderId: `report-${Date.now()}`,
+        status: 'PAID',
+        amountIdr: 50_000,
+        credits: 50,
+        paidAt: new Date('2026-10-16T03:00:00.000Z'),
+        createdAt: new Date('2026-10-10T03:00:00.000Z'),
+      },
+    });
+
+    const response = await request(app)
+      .get('/api/admin/reports?from=2026-10&to=2026-11&sort=purchases')
+      .set(bearer(admin));
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const parsed = adminReportResponseSchema.safeParse(response.body.data);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(response.body.data.report.range).toEqual({ from: '2026-10', to: '2026-11' });
+    expect(response.body.data.report.summary).toMatchObject({
+      revenueIdr: 50_000,
+      payments: 1,
+      creditsPurchased: 100,
+      creditsUsed: 25,
+      aiRequests: 5,
+      aiCreditsCharged: 7,
+    });
+    expect(response.body.data.report.monthlyRevenue).toEqual([
+      { month: '2026-10', revenueIdr: 50_000, payments: 1, creditsSold: 50 },
+      { month: '2026-11', revenueIdr: 0, payments: 0, creditsSold: 0 },
+    ]);
+    expect(response.body.data.report.monthlyAiUsage[1]).toMatchObject({
+      month: '2026-11',
+      requests: 3,
+      failedRequests: 3,
+    });
+    expect(response.body.data.report.perUser.items[0]).toMatchObject({
+      userId: target.userId,
+      creditsPurchased: 100,
+      purchaseCount: 1,
+      creditsUsed: 25,
+      usageCount: 1,
+    });
+
+    const filtered = await request(app)
+      .get(
+        `/api/admin/reports?from=2026-10&to=2026-11&feature=CV_ENHANCEMENT&search=${encodeURIComponent(target.email)}`,
+      )
+      .set(bearer(admin));
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data.report.summary.aiRequests).toBe(2);
+    expect(filtered.body.data.report.monthlyAiUsage[1]?.requests).toBe(0);
+    expect(filtered.body.data.report.perUser.total).toBe(1);
+
+    const invalidRange = await request(app)
+      .get('/api/admin/reports?from=2026-12&to=2026-11')
+      .set(bearer(admin));
+    expect(invalidRange.status).toBe(400);
   });
 
   it('changes a credit price through the pricing service', async () => {

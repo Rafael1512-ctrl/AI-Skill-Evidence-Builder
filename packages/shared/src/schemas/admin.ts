@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { MAX_FEATURE_CREDIT_COST } from '../constants/credit-pricing.js';
+import { FEATURE_KEYS, MAX_FEATURE_CREDIT_COST } from '../constants/credit-pricing.js';
 import { PAYMENT_STATUSES, SCREENING_JOB_STATES } from '../constants/workflow.js';
 import { USER_ROLES } from '../constants/roles.js';
 import { creditTransactionSchema, featurePricingSchema } from './credits.js';
@@ -105,6 +105,112 @@ export const aiUsageSummaryQuerySchema = paginationQuerySchema.extend({
 });
 
 export type AiUsageSummaryQuery = z.infer<typeof aiUsageSummaryQuerySchema>;
+
+const REPORT_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const ADMIN_REPORT_MAX_MONTHS = 36;
+
+export const adminReportMonthSchema = z
+  .string()
+  .trim()
+  .regex(REPORT_MONTH_PATTERN, 'Gunakan format bulan YYYY-MM.');
+
+function monthIndex(value: string): number {
+  const [year = 0, month = 1] = value.split('-').map(Number);
+  return year * 12 + month - 1;
+}
+
+/**
+ * Filters for the read-only admin reports.
+ *
+ * `from` and `to` are inclusive calendar months in Asia/Jakarta. When omitted the service
+ * returns the current month and the previous five months. Keeping the range bounded prevents
+ * an accidental all-history aggregate over the ledger and usage tables.
+ */
+export const adminReportQuerySchema = paginationQuerySchema
+  .extend({
+    from: adminReportMonthSchema.optional(),
+    to: adminReportMonthSchema.optional(),
+    feature: z.enum(FEATURE_KEYS).optional(),
+    search: z.string().trim().max(120).optional(),
+    sort: z.enum(['usage', 'purchases', 'balance']).default('usage'),
+  })
+  .refine((value) => value.from === undefined || value.to === undefined || value.from <= value.to, {
+    message: 'Bulan awal tidak boleh setelah bulan akhir.',
+    path: ['from'],
+  })
+  .refine(
+    (value) =>
+      value.from === undefined ||
+      value.to === undefined ||
+      monthIndex(value.to) - monthIndex(value.from) + 1 <= ADMIN_REPORT_MAX_MONTHS,
+    { message: `Rentang laporan maksimal ${ADMIN_REPORT_MAX_MONTHS} bulan.`, path: ['to'] },
+  );
+
+export type AdminReportQuery = z.infer<typeof adminReportQuerySchema>;
+
+export const adminMonthlyRevenueReportSchema = z.object({
+  month: adminReportMonthSchema,
+  revenueIdr: z.number().int().min(0),
+  payments: z.number().int().min(0),
+  creditsSold: z.number().int().min(0),
+});
+
+export type AdminMonthlyRevenueReport = z.infer<typeof adminMonthlyRevenueReportSchema>;
+
+export const adminMonthlyAiUsageReportSchema = z.object({
+  month: adminReportMonthSchema,
+  requests: z.number().int().min(0),
+  failedRequests: z.number().int().min(0),
+  inputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  cachedTokens: z.number().int().min(0),
+  estimatedCostUsd: z.number().min(0),
+  creditsCharged: z.number().int().min(0),
+});
+
+export type AdminMonthlyAiUsageReport = z.infer<typeof adminMonthlyAiUsageReportSchema>;
+
+export const adminUserCreditReportSchema = z.object({
+  userId: z.string(),
+  email: z.string(),
+  fullName: z.string().nullable(),
+  role: z.enum(USER_ROLES),
+  balance: z.number().int(),
+  reserved: z.number().int(),
+  creditsPurchased: z.number().int().min(0),
+  purchaseCount: z.number().int().min(0),
+  creditsUsed: z.number().int().min(0),
+  usageCount: z.number().int().min(0),
+});
+
+export type AdminUserCreditReport = z.infer<typeof adminUserCreditReportSchema>;
+
+export const adminReportSchema = z.object({
+  range: z.object({
+    from: adminReportMonthSchema,
+    to: adminReportMonthSchema,
+  }),
+  summary: z.object({
+    revenueIdr: z.number().int().min(0),
+    payments: z.number().int().min(0),
+    creditsPurchased: z.number().int().min(0),
+    creditsUsed: z.number().int().min(0),
+    aiRequests: z.number().int().min(0),
+    aiEstimatedCostUsd: z.number().min(0),
+    aiCreditsCharged: z.number().int().min(0),
+  }),
+  monthlyRevenue: z.array(adminMonthlyRevenueReportSchema),
+  monthlyAiUsage: z.array(adminMonthlyAiUsageReportSchema),
+  perUser: z.object({
+    items: z.array(adminUserCreditReportSchema),
+    page: z.number().int().min(1),
+    pageSize: z.number().int().min(1),
+    total: z.number().int().min(0),
+  }),
+});
+
+export type AdminReport = z.infer<typeof adminReportSchema>;
+export const adminReportResponseSchema = z.object({ report: adminReportSchema });
 
 /* -------------------------------------------------------------------------- */
 /* Console payloads (Phase 18)                                                 */

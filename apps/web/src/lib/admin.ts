@@ -1,17 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  adminAiUsageListSchema,
+  adminCreditAdjustmentResponseSchema,
   adminFailedCandidateListSchema,
   adminJobListSchema,
   adminOverviewResponseSchema,
+  adminPaymentListSchema,
+  adminReportResponseSchema,
   adminTransactionListSchema,
   adminUserListSchema,
+  adminWebhookEventListSchema,
   featurePricingSchema,
   publicTestimonialListResponseSchema,
   testimonialListResponseSchema,
   testimonialResponseSchema,
   type Testimonial as TestimonialDto,
   type TestimonialStatus,
+  type UserRole,
 } from '@aseb/shared';
 import { z } from 'zod';
 
@@ -32,6 +38,19 @@ const adminUsersResponseSchema = z.object({ users: adminUserListSchema });
 const adminTransactionsResponseSchema = z.object({ transactions: adminTransactionListSchema });
 const adminJobsResponseSchema = z.object({ jobs: adminJobListSchema });
 const adminFailedResponseSchema = z.object({ failed: adminFailedCandidateListSchema });
+const adminPaymentsResponseSchema = z.object({ payments: adminPaymentListSchema });
+const adminWebhookEventsResponseSchema = z.object({ events: adminWebhookEventListSchema });
+const adminAiUsageResponseSchema = z.object({ usage: adminAiUsageListSchema });
+
+export interface AdminReportFilters {
+  from: string;
+  to: string;
+  feature?: string;
+  search?: string;
+  sort: 'usage' | 'purchases' | 'balance';
+  page: number;
+  pageSize: number;
+}
 
 export function useAdminOverviewQuery() {
   const { token, status, profile } = useAuth();
@@ -59,6 +78,52 @@ export function useAdminUsersQuery(page = 1, pageSize = 20) {
   });
 }
 
+export function useAdminSearchUsersQuery(
+  filters: { search?: string; role?: UserRole; page?: number; pageSize?: number } = {},
+) {
+  const { token, status, profile } = useAuth();
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 20;
+
+  return useQuery({
+    queryKey: ['admin', 'users', token, filters.search, filters.role, page, pageSize],
+    enabled: status === 'signed-in' && token !== null && profile?.role === 'ADMIN',
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (filters.search) params.set('search', filters.search);
+      if (filters.role) params.set('role', filters.role);
+      return apiRequest(`/api/admin/users?${params.toString()}`, {
+        token,
+        schema: adminUsersResponseSchema,
+      });
+    },
+  });
+}
+
+export function useAdminReportsQuery(filters: AdminReportFilters) {
+  const { token, status, profile } = useAuth();
+
+  return useQuery({
+    queryKey: ['admin', 'reports', token, filters],
+    enabled: status === 'signed-in' && token !== null && profile?.role === 'ADMIN',
+    queryFn: () => {
+      const params = new URLSearchParams({
+        from: filters.from,
+        to: filters.to,
+        sort: filters.sort,
+        page: String(filters.page),
+        pageSize: String(filters.pageSize),
+      });
+      if (filters.feature) params.set('feature', filters.feature);
+      if (filters.search) params.set('search', filters.search);
+      return apiRequest(`/api/admin/reports?${params.toString()}`, {
+        token,
+        schema: adminReportResponseSchema,
+      });
+    },
+  });
+}
+
 export function useAdminTransactionsQuery(page = 1, pageSize = 20) {
   const { token, status, profile } = useAuth();
 
@@ -70,6 +135,55 @@ export function useAdminTransactionsQuery(page = 1, pageSize = 20) {
         token,
         schema: adminTransactionsResponseSchema,
       }),
+  });
+}
+
+export function useAdminPaymentsQuery(page = 1, pageSize = 20) {
+  const { token, status, profile } = useAuth();
+
+  return useQuery({
+    queryKey: ['admin', 'payments', token, page, pageSize],
+    enabled: status === 'signed-in' && token !== null && profile?.role === 'ADMIN',
+    queryFn: () =>
+      apiRequest(`/api/admin/payments?page=${page}&pageSize=${pageSize}`, {
+        token,
+        schema: adminPaymentsResponseSchema,
+      }),
+  });
+}
+
+export function useAdminWebhookEventsQuery(page = 1, pageSize = 20) {
+  const { token, status, profile } = useAuth();
+
+  return useQuery({
+    queryKey: ['admin', 'webhook-events', token, page, pageSize],
+    enabled: status === 'signed-in' && token !== null && profile?.role === 'ADMIN',
+    queryFn: () =>
+      apiRequest(`/api/admin/webhook-events?page=${page}&pageSize=${pageSize}`, {
+        token,
+        schema: adminWebhookEventsResponseSchema,
+      }),
+  });
+}
+
+export function useAdminAiUsageQuery(
+  filters: { feature?: string; page?: number; pageSize?: number } = {},
+) {
+  const { token, status, profile } = useAuth();
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 20;
+
+  return useQuery({
+    queryKey: ['admin', 'ai-usage', token, filters.feature, page, pageSize],
+    enabled: status === 'signed-in' && token !== null && profile?.role === 'ADMIN',
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (filters.feature) params.set('feature', filters.feature);
+      return apiRequest(`/api/admin/ai-usage?${params.toString()}`, {
+        token,
+        schema: adminAiUsageResponseSchema,
+      });
+    },
   });
 }
 
@@ -159,6 +273,55 @@ export function useUpdateFeaturePricingMutation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
       void queryClient.invalidateQueries({ queryKey: ['credits', 'pricing'] });
+    },
+  });
+}
+
+export function useUpdateAdminUserRoleMutation() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: UserRole }) => {
+      const response = await apiRequest(`/api/admin/users/${userId}/role`, {
+        method: 'PATCH',
+        body: { role },
+        token,
+        schema: z.object({
+          user: z.object({
+            id: z.string(),
+            email: z.string(),
+            role: z.enum(['USER', 'ADMIN']),
+            updatedAt: z.string(),
+          }),
+        }),
+      });
+      return response.user;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+export function useAdjustAdminCreditsMutation() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, amount, reason }: { userId: string; amount: number; reason: string }) =>
+      apiRequest(`/api/admin/users/${userId}/credits`, {
+        method: 'POST',
+        body: { amount, reason },
+        token,
+        schema: adminCreditAdjustmentResponseSchema,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      void queryClient.invalidateQueries({ queryKey: ['credits'] });
     },
   });
 }

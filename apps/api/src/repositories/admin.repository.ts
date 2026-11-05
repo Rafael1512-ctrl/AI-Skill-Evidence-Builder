@@ -23,6 +23,32 @@ export interface AdminUserRow {
   reserved: number;
 }
 
+export interface AdminRevenueReportRow {
+  createdAt: Date;
+  paidAt: Date | null;
+  completedAt: Date | null;
+  amountIdr: number;
+  credits: number;
+}
+
+export interface AdminAiUsageReportRow {
+  createdAt: Date;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  estimatedCostUsd: unknown;
+  creditsCharged: number;
+  success: boolean;
+}
+
+export interface AdminUserCreditAggregate {
+  userId: string;
+  type: 'TOP_UP' | 'USAGE';
+  amount: number;
+  count: number;
+}
+
 export class AdminRepository {
   /* ------------------------------------------------------------------ */
   /* Overview aggregates                                                */
@@ -83,6 +109,117 @@ export class AdminRepository {
       paidCount: paid._count._all,
       pendingIdr: pending._sum.amountIdr ?? 0,
     };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Filterable reports                                                 */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Paid payments whose money date falls in the requested range.
+   *
+   * Revenue is recognised on `paidAt` (falling back to completion/creation for imported rows),
+   * not on when the row happened to be created.
+   */
+  async listRevenueReportRows(input: { start: Date; end: Date }): Promise<AdminRevenueReportRow[]> {
+    return getPrisma().paymentTransaction.findMany({
+      where: {
+        status: { in: ['PAID', 'COMPLETED'] },
+        OR: [
+          { paidAt: { gte: input.start, lt: input.end } },
+          { completedAt: { gte: input.start, lt: input.end } },
+          {
+            paidAt: null,
+            completedAt: null,
+            createdAt: { gte: input.start, lt: input.end },
+          },
+        ],
+      },
+      select: {
+        createdAt: true,
+        paidAt: true,
+        completedAt: true,
+        amountIdr: true,
+        credits: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async listAiUsageReportRows(input: {
+    start: Date;
+    end: Date;
+    feature?: string | undefined;
+  }): Promise<AdminAiUsageReportRow[]> {
+    return getPrisma().aiUsageRecord.findMany({
+      where: {
+        createdAt: { gte: input.start, lt: input.end },
+        ...(input.feature ? { feature: input.feature } : {}),
+      },
+      select: {
+        createdAt: true,
+        requestCount: true,
+        inputTokens: true,
+        outputTokens: true,
+        cachedTokens: true,
+        estimatedCostUsd: true,
+        creditsCharged: true,
+        success: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async aggregateUserCreditsReport(input: {
+    start: Date;
+    end: Date;
+  }): Promise<AdminUserCreditAggregate[]> {
+    const rows = await getPrisma().creditTransaction.groupBy({
+      by: ['userId', 'type'],
+      where: {
+        createdAt: { gte: input.start, lt: input.end },
+        type: { in: ['TOP_UP', 'USAGE'] },
+      },
+      _sum: { amount: true },
+      _count: { _all: true },
+    });
+
+    return rows.map((row) => ({
+      userId: row.userId,
+      type: row.type as 'TOP_UP' | 'USAGE',
+      amount: row._sum.amount ?? 0,
+      count: row._count._all,
+    }));
+  }
+
+  async listMatchingUserIds(search?: string | undefined): Promise<string[]> {
+    const rows = await getPrisma().user.findMany({
+      where: search
+        ? {
+            OR: [
+              { email: { contains: search, mode: 'insensitive' } },
+              { fullName: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {},
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
+  async listReportUsers(userIds: string[]): Promise<AdminUserRow[]> {
+    if (userIds.length === 0) return [];
+
+    const rows = await getPrisma().user.findMany({
+      where: { id: { in: userIds } },
+      include: { wallet: { select: { balance: true, reserved: true } } },
+    });
+
+    return rows.map((row) => ({
+      user: row,
+      balance: row.wallet?.balance ?? 0,
+      reserved: row.wallet?.reserved ?? 0,
+    }));
   }
 
   /* ------------------------------------------------------------------ */

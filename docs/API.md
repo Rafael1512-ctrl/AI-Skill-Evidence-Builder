@@ -167,19 +167,20 @@ in the same atomic settlement that charges the delivered candidates.
 Every route below is guarded once by `requireAuth()` + `requireAdmin()` on the router: the role
 is re-read from the database per request, so a stale or forged token claim changes nothing.
 
-| Method | Path                           | Notes                                                                                                                         |
-| ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/admin/overview`              | Dashboard aggregates (users, credits, revenue, AI cost/margin, screening, testimonials, system) plus the effective price list |
-| GET    | `/admin/users`                 | Paginated users with wallet balances; `search` and `role` filters                                                             |
-| GET    | `/admin/transactions`          | System-wide ledger                                                                                                            |
-| GET    | `/admin/payments`              | Every payment attempt                                                                                                         |
-| GET    | `/admin/webhook-events`        | Deliveries, including rejected signatures and processing errors                                                               |
-| GET    | `/admin/ai-usage`              | Provider cost and margin (internal; never user-facing)                                                                        |
-| GET    | `/admin/jobs`                  | Screening jobs with their owner                                                                                               |
-| GET    | `/admin/failed-candidates`     | Failed candidates with the reason and attempt count                                                                           |
-| PUT    | `/admin/pricing/:feature`      | Credit-price override through the pricing service; records who changed it                                                     |
-| PATCH  | `/admin/users/:userId/role`    | Grant/revoke the admin role; self-demotion is refused (409)                                                                   |
-| POST   | `/admin/users/:userId/credits` | Ledger-routed `ADJUSTMENT`; a balance can never go negative                                                                   |
+| Method | Path                           | Notes                                                                                                                                                                                    |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/admin/overview`              | Dashboard aggregates (users, credits, revenue, AI cost/margin, screening, testimonials, system) plus the effective price list                                                            |
+| GET    | `/admin/reports`               | Filterable monthly revenue, monthly AI usage, and per-user credit purchase/usage reports; accepts `from`/`to` (`YYYY-MM`, Asia/Jakarta), `feature`, `search`, `sort`, `page`, `pageSize` |
+| GET    | `/admin/users`                 | Paginated users with wallet balances; `search` and `role` filters                                                                                                                        |
+| GET    | `/admin/transactions`          | System-wide ledger                                                                                                                                                                       |
+| GET    | `/admin/payments`              | Every payment attempt                                                                                                                                                                    |
+| GET    | `/admin/webhook-events`        | Deliveries, including rejected signatures and processing errors                                                                                                                          |
+| GET    | `/admin/ai-usage`              | Provider cost and margin (internal; never user-facing)                                                                                                                                   |
+| GET    | `/admin/jobs`                  | Screening jobs with their owner                                                                                                                                                          |
+| GET    | `/admin/failed-candidates`     | Failed candidates with the reason and attempt count                                                                                                                                      |
+| PUT    | `/admin/pricing/:feature`      | Credit-price override through the pricing service; records who changed it                                                                                                                |
+| PATCH  | `/admin/users/:userId/role`    | Grant/revoke the admin role; self-demotion is refused (409)                                                                                                                              |
+| POST   | `/admin/users/:userId/credits` | Ledger-routed `ADJUSTMENT`; a balance can never go negative                                                                                                                              |
 
 Scoping is by ownership: another recruiter's job is answered with `404`, indistinguishable
 from a missing one. See `docs/DATABASE.md` and `docs/AI_PROMPTS.md` for the pipeline behind

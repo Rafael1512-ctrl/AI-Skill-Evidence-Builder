@@ -40,8 +40,9 @@ requirement stay visible instead of silently disappearing.
   only through the ledger. The offline `mock` provider settles end-to-end in development;
   the Midtrans adapter is prepared but never auto-activated.
 - Testimonials with moderation.
-- Admin console: users, wallets, transactions, payments, AI usage, jobs, failed jobs, testimonials,
-  feature pricing, system health.
+- Admin console: a dedicated dashboard shell plus filterable monthly revenue, monthly AI usage,
+  per-user credit purchases/usage, users and roles, ledger adjustments, payments, webhooks, AI
+  call cost, screening failures, testimonial moderation, feature pricing, and system health.
 - The admin console has no visible navigation entry; administrators open `/admin` directly and the
   API continues to enforce the stored admin role.
 

@@ -345,6 +345,11 @@ Key details:
 - **The aggregates are reads, not a materialised dashboard.** Credit inflow/outflow comes from
   `credit_transactions` over a 30-day window, so the console can never disagree with the ledger;
   provider cost and margin come from `ai_usage_records`.
+- **Filterable reports are derived at read time.** Revenue uses the payment's `paid_at` date and
+  only `PAID`/`COMPLETED` rows; monthly AI usage comes from `ai_usage_records`; per-user purchases
+  and usage come from `TOP_UP` and `USAGE` ledger rows. Calendar-month boundaries use Asia/Jakarta,
+  the default range is six months, and the accepted range is capped at 36 months. The optional AI
+  feature and user-search filters narrow the same ranges without introducing a reporting table.
 - **Price changes are an audited override.** `FeaturePricing.updatedByUserId` records the admin
   who changed a price, and the shared defaults remain the fallback when no row exists.
 - **A manual credit adjustment is an `ADJUSTMENT` ledger entry** (`reference_type =
